@@ -39,6 +39,7 @@ struct SimulatorDevice: Identifiable, Hashable {
 
     var appCount: Int { apps.count }
     var lastUsed: Date? { lastBootedAt }
+    var lastUsedSortKey: Date { lastUsed ?? .distantPast }
     var sizeDescription: String {
         ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
     }

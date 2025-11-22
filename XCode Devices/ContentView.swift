@@ -10,15 +10,13 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var viewModel = DeviceScanner()
-    @State private var sortOption: SortOption = .size
+    @State private var sortOrder: [KeyPathComparator<SimulatorDevice>] = [KeyPathComparator(\.sizeBytes, order: .reverse)]
     @State private var searchText: String = ""
     @State private var selectedFilter: SidebarSelection = .all
     @State private var selectedDeviceID: String?
     @State private var devicePendingDeletion: SimulatorDevice?
     @State private var showDeleteConfirmation: Bool = false
     @State private var deletionInProgress: String?
-    @State private var pendingScrollID: String?
-    @State private var sortAscending: Bool = SortOption.size.defaultAscending
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     private let sizeColumnWidth: CGFloat = 90
@@ -32,18 +30,9 @@ struct ContentView: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
         } content: {
-            ScrollViewReader { proxy in
-                simulatorList(proxy: proxy)
-                    .onChange(of: pendingScrollID, initial: false) { _, id in
-                        guard let id else { return }
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                        pendingScrollID = nil
-                    }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .controlBackgroundColor))
+            simulatorList
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+//                .background(Color(nsColor: .controlBackgroundColor))
         } detail: {
             detailPanel
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
@@ -54,7 +43,7 @@ struct ContentView: View {
                 Divider()
                 storagePanel
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(.background)
         }
 //        .toolbar {
 //            ToolbarItemGroup(placement: .navigation) {
@@ -65,7 +54,7 @@ struct ContentView: View {
 //                }
 //            }
 //        }
-        .background(Color(nsColor: .controlBackgroundColor))
+//        .background(Color(nsColor: .controlBackgroundColor))
         .onAppear {
             if viewModel.devices.isEmpty {
                 viewModel.refresh()
@@ -197,7 +186,7 @@ struct ContentView: View {
             .padding(16)
             .frame(width: 240, alignment: .topLeading)
             .frame(maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(nsColor: .windowBackgroundColor))
+//            .background(Color(nsColor: .windowBackgroundColor))
         }
     }
 
@@ -241,7 +230,7 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    private func simulatorList(proxy: ScrollViewProxy) -> some View {
+    private var simulatorList: some View {
         VStack(spacing: 0) {
             listHeader
             Divider()
@@ -273,30 +262,60 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            tableHeader
-                            LazyVStack(alignment: .leading, spacing: 10) {
-                                ForEach(filteredDevices) { device in
-                                    SimulatorRow(
-                                        device: device,
-                                        isSelected: device.id == selectedDevice?.id,
-                                        appIcons: Array(device.apps.prefix(4)),
-                                        totalAppsCount: device.appCount,
-                                        onSelect: {
-                                            selectDevice(device)
-                                        },
-                                        sizeWidth: sizeColumnWidth,
-                                        lastUsedWidth: lastUsedColumnWidth,
-                                        appsWidth: appsColumnWidth
-                                    )
-                                    .id(device.id)
+                    Table(sortedDevices, selection: tableSelection, sortOrder: $sortOrder) {
+                        TableColumn("Тип", value: \.deviceType) { device in
+                            HStack(spacing: 12) {
+                                DeviceIconView(device: device, size: 32)
+                                    .frame(width: 56, height: 56)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(device.name)
+                                        .font(.headline)
+                                        .lineLimit(1)
+                                    Text(device.runtime)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
                                 }
                             }
-                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        Spacer(minLength: 160)
+                        TableColumn("Размер", value: \.sizeBytes) { device in
+                            Text(device.sizeDescription)
+                                .font(.callout.weight(.semibold))
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                        .width(sizeColumnWidth)
+                        TableColumn("Последний запуск", value: \.lastUsedSortKey) { device in
+                            Text(device.lastUsedDescription)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .width(lastUsedColumnWidth)
+                        TableColumn("Приложения", value: \.appCount) { device in
+                            let appIcons = Array(device.apps.prefix(4))
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    ForEach(appIcons) { app in
+                                        AppIconView(app: app)
+                                            .frame(width: 22, height: 22)
+                                            .cornerRadius(6)
+                                    }
+                                }
+                                if device.appCount > appIcons.count {
+                                    Text("and \(device.appCount - appIcons.count) more")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .width(appsColumnWidth)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .tableStyle(.inset(alternatesRowBackgrounds: true))
                 }
             }
         }
@@ -340,18 +359,29 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .center, spacing: 16) {
                 if let device = selectedDevice {
-                    VStack(spacing: 14) {
-                        DeviceIconView(device: device, size: 64)
-                            .frame(width: 90, height: 120)
-                        VStack(spacing: 4) {
-                            Text(device.name)
-                                .font(.title3.bold())
-                            Text(device.runtime)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Text(device.deviceType)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    ZStack {
+                        
+                        LinearGradient(
+                            colors: [DeviceIcon.for(category: device.category).background.opacity(0.2), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .top)
+                        .padding(-28)
+                        
+                        VStack(spacing: 14) {
+                            DeviceIconView(device: device, size: 64)
+                                .frame(width: 90, height: 120)
+                            VStack(spacing: 4) {
+                                Text(device.name)
+                                    .font(.title3.bold())
+                                Text(device.runtime)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Text(device.deviceType)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     
@@ -440,7 +470,7 @@ struct ContentView: View {
                 }
             }
             .padding(20)
-            .frame(width: 360, alignment: .top)
+//            .frame(width: 360, alignment: .top)
             .frame(maxHeight: .infinity, alignment: .top)
         }
     }
@@ -474,7 +504,6 @@ struct ContentView: View {
                 segments: storageSegments,
                 freeShare: freeDiskShare
             ) { id in
-                pendingScrollID = id
                 selectedDeviceID = id
             }
             .frame(height: 32)
@@ -486,7 +515,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Color(nsColor: .windowBackgroundColor))
+//        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var filteredDevices: [SimulatorDevice] {
@@ -498,18 +527,36 @@ struct ContentView: View {
             return haystack.contains(trimmed.lowercased())
         }
 
-        return devices.sorted(by: sortComparator)
+        return devices
+    }
+
+    private var sortedDevices: [SimulatorDevice] {
+        filteredDevices.sorted(using: sortOrder)
     }
 
     private var filteredDeviceIDs: [String] {
-        filteredDevices.map(\.id)
+        sortedDevices.map(\.id)
     }
 
     private var selectedDevice: SimulatorDevice? {
         if let id = selectedDeviceID {
-            return filteredDevices.first(where: { $0.id == id })
+            return sortedDevices.first(where: { $0.id == id })
         }
-        return filteredDevices.first
+        return sortedDevices.first
+    }
+
+    private var tableSelection: Binding<Set<String>> {
+        Binding(
+            get: {
+                if let id = selectedDeviceID {
+                    return [id]
+                }
+                return []
+            },
+            set: { newValue in
+                selectedDeviceID = newValue.first
+            }
+        )
     }
 
     private var runtimeFilters: [RuntimeEntry] {
@@ -551,39 +598,6 @@ struct ContentView: View {
         let count = viewModel.devices.count
         let diskPercent = percentDescription(value: viewModel.totalSizeBytes, of: viewModel.diskTotalBytes)
         return "\(sims) в \(count) симуляторах (\(diskPercent) диска)"
-    }
-
-    private var tableHeader: some View {
-        HStack(spacing: 12) {
-            headerButton(title: "Тип", option: .type, width: nil, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            headerButton(title: "Размер", option: .size, width: sizeColumnWidth, alignment: .trailing)
-            headerButton(title: "Последний запуск", option: .lastUsed, width: lastUsedColumnWidth, alignment: .leading)
-            headerButton(title: "Приложения", option: .apps, width: appsColumnWidth, alignment: .leading)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.gray.opacity(0.05))
-    }
-
-    private func headerButton(title: String, option: SortOption, width: CGFloat?, alignment: Alignment) -> some View {
-        let label = HStack(spacing: 4) {
-            Text(title)
-            if sortOption == option {
-                Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
-                    .font(.system(size: 10, weight: .bold))
-            }
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(sortOption == option ? Color.primary : Color.secondary)
-
-        return Button {
-            toggleSort(option)
-        } label: {
-            label.frame(width: width, alignment: alignment)
-        }
-        .buttonStyle(.plain)
     }
 
     private func passesFilter(_ device: SimulatorDevice) -> Bool {
@@ -628,46 +642,6 @@ struct ContentView: View {
         }.count
     }
 
-    private func selectDevice(_ device: SimulatorDevice) {
-        selectedDeviceID = device.id
-    }
-
-    private func sortComparator(_ lhs: SimulatorDevice, _ rhs: SimulatorDevice) -> Bool {
-        let ascending = sortAscending
-        switch sortOption {
-        case .type:
-            let primary = lhs.deviceType.localizedCaseInsensitiveCompare(rhs.deviceType)
-            if primary != .orderedSame {
-                return ascending ? primary == .orderedAscending : primary == .orderedDescending
-            }
-            if lhs.sizeBytes != rhs.sizeBytes {
-                return lhs.sizeBytes > rhs.sizeBytes
-            }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        case .size:
-            return ascending ? lhs.sizeBytes < rhs.sizeBytes : lhs.sizeBytes > rhs.sizeBytes
-        case .lastUsed:
-            let l = lhs.lastUsed ?? .distantPast
-            let r = rhs.lastUsed ?? .distantPast
-            return ascending ? l < r : l > r
-        case .apps:
-            if lhs.appCount == rhs.appCount {
-                let result = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-                return ascending ? result == .orderedAscending : result == .orderedDescending
-            }
-            return ascending ? lhs.appCount < rhs.appCount : lhs.appCount > rhs.appCount
-        }
-    }
-
-    private func toggleSort(_ option: SortOption) {
-        if sortOption == option {
-            sortAscending.toggle()
-        } else {
-            sortOption = option
-            sortAscending = option.defaultAscending
-        }
-    }
-
     private func toggleSidebar() {
         NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
     }
@@ -692,83 +666,6 @@ struct ContentView: View {
         guard total > 0 else { return "0%" }
         let pct = Double(value) / Double(total) * 100
         return pct.formatted(.number.precision(.fractionLength(1))) + "%"
-    }
-}
-
-private struct SimulatorRow: View {
-    let device: SimulatorDevice
-    let isSelected: Bool
-    let appIcons: [SimulatorApp]
-    let totalAppsCount: Int
-    let onSelect: () -> Void
-    let sizeWidth: CGFloat
-    let lastUsedWidth: CGFloat
-    let appsWidth: CGFloat
-
-    var body: some View {
-        Button(action: onSelect) {
-            HStack(alignment: .center, spacing: 12) {
-                HStack(spacing: 12) {
-                    DeviceIconView(device: device, size: 32)
-                        .frame(width: 56, height: 56)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(device.name)
-                            .font(.headline)
-                            .lineLimit(1)
-                        HStack(spacing: 8) {
-                            Text(device.runtime)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text(device.sizeDescription)
-                    .font(.callout.weight(.semibold))
-                    .frame(width: sizeWidth, alignment: .trailing)
-
-                Text(device.lastUsedDescription)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: lastUsedWidth, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        ForEach(appIcons) { app in
-                            AppIconView(app: app)
-                                .frame(width: 22, height: 22)
-                                .cornerRadius(6)
-                        }
-                    }
-
-                    if remainingApps > 0 {
-                        Text("and \(remainingApps) more")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(width: appsWidth, alignment: .leading)
-            }
-            .padding(12)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.gray.opacity(0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isSelected ? Color.accentColor : Color.gray.opacity(0.1), lineWidth: 1)
-        )
-    }
-
-    private var remainingApps: Int {
-        max(totalAppsCount - appIcons.count, 0)
     }
 }
 
@@ -1066,8 +963,8 @@ struct DeviceIconView: View {
     var body: some View {
         let visual = DeviceIcon.for(category: device.category)
         ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(visual.background.opacity(0.15))
+//            RoundedRectangle(cornerRadius: 14, style: .continuous)
+//                .fill(visual.background.opacity(0.15))
             Image(systemName: visual.symbol)
                 .resizable()
                 .scaledToFit()
@@ -1127,31 +1024,6 @@ struct AppIconView: View {
                     .padding(4)
                     .foregroundStyle(.white)
             }
-        }
-    }
-}
-
-enum SortOption: String, CaseIterable, Identifiable {
-    case type
-    case size
-    case lastUsed
-    case apps
-
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .type: return "Тип"
-        case .size: return "Размер"
-        case .lastUsed: return "Последний запуск"
-        case .apps: return "Приложения"
-        }
-    }
-
-    var defaultAscending: Bool {
-        switch self {
-        case .type: return true
-        case .size, .lastUsed, .apps: return false
         }
     }
 }
