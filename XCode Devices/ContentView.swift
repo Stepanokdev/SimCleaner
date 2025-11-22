@@ -18,6 +18,11 @@ struct ContentView: View {
     @State private var showDeleteConfirmation: Bool = false
     @State private var deletionInProgress: String?
     @State private var pendingScrollID: String?
+    @State private var sortAscending: Bool = SortOption.size.defaultAscending
+
+    private let sizeColumnWidth: CGFloat = 90
+    private let lastUsedColumnWidth: CGFloat = 150
+    private let appsColumnWidth: CGFloat = 140
 
     private let recentThreshold: TimeInterval = 60 * 60 * 24 * 14
 
@@ -259,28 +264,26 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(filteredDevices) { device in
-                                SimulatorRow(
-                                    device: device,
-                                    isSelected: device.id == selectedDevice?.id,
-                                    appIcons: Array(device.apps.prefix(8)),
-                                    onSelect: {
-                                        selectDevice(device)
-                                    },
-                                    onReveal: {
-                                        revealFolder(device.rootPath)
-                                    },
-                                    onDelete: {
-                                        devicePendingDeletion = device
-                                        showDeleteConfirmation = true
-                                    },
-                                    isDeleting: deletionInProgress == device.udid
-                                )
-                                .id(device.id)
+                        VStack(spacing: 0) {
+                            tableHeader
+                            LazyVStack(alignment: .leading, spacing: 10) {
+                                ForEach(filteredDevices) { device in
+                                    SimulatorRow(
+                                        device: device,
+                                        isSelected: device.id == selectedDevice?.id,
+                                        appIcons: Array(device.apps.prefix(8)),
+                                        onSelect: {
+                                            selectDevice(device)
+                                        },
+                                        sizeWidth: sizeColumnWidth,
+                                        lastUsedWidth: lastUsedColumnWidth,
+                                        appsWidth: appsColumnWidth
+                                    )
+                                    .id(device.id)
+                                }
                             }
+                            .padding(12)
                         }
-                        .padding(12)
                     }
                 }
             }
@@ -296,13 +299,6 @@ struct ContentView: View {
                 Text("\(filteredDevices.count) из \(viewModel.devices.count) • \(formatBytes(viewModel.totalSizeBytes)) суммарно")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Picker("Сортировка", selection: $sortOption) {
-                    ForEach(SortOption.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 340)
             }
             Spacer()
             HStack(spacing: 8) {
@@ -332,7 +328,7 @@ struct ContentView: View {
         VStack(alignment: .center, spacing: 16) {
             if let device = selectedDevice {
                 VStack(spacing: 14) {
-                    DeviceIconView(device: device)
+                    DeviceIconView(device: device, size: 64)
                         .frame(width: 90, height: 120)
                     VStack(spacing: 4) {
                         Text(device.name)
@@ -519,6 +515,39 @@ struct ContentView: View {
         return "\(sims) в \(count) симуляторах (\(diskPercent) диска)"
     }
 
+    private var tableHeader: some View {
+        HStack(spacing: 12) {
+            headerButton(title: "Тип", option: .type, width: nil, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            headerButton(title: "Размер", option: .size, width: sizeColumnWidth, alignment: .trailing)
+            headerButton(title: "Последний запуск", option: .lastUsed, width: lastUsedColumnWidth, alignment: .leading)
+            headerButton(title: "Приложения", option: .apps, width: appsColumnWidth, alignment: .leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.gray.opacity(0.05))
+    }
+
+    private func headerButton(title: String, option: SortOption, width: CGFloat?, alignment: Alignment) -> some View {
+        let label = HStack(spacing: 4) {
+            Text(title)
+            if sortOption == option {
+                Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
+                    .font(.system(size: 10, weight: .bold))
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(sortOption == option ? Color.primary : Color.secondary)
+
+        return Button {
+            toggleSort(option)
+        } label: {
+            label.frame(width: width, alignment: alignment)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func passesFilter(_ device: SimulatorDevice) -> Bool {
         switch selectedFilter {
         case .all:
@@ -566,19 +595,38 @@ struct ContentView: View {
     }
 
     private func sortComparator(_ lhs: SimulatorDevice, _ rhs: SimulatorDevice) -> Bool {
+        let ascending = sortAscending
         switch sortOption {
-        case .size: return lhs.sizeBytes > rhs.sizeBytes
+        case .type:
+            let primary = lhs.deviceType.localizedCaseInsensitiveCompare(rhs.deviceType)
+            if primary != .orderedSame {
+                return ascending ? primary == .orderedAscending : primary == .orderedDescending
+            }
+            if lhs.sizeBytes != rhs.sizeBytes {
+                return lhs.sizeBytes > rhs.sizeBytes
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        case .size:
+            return ascending ? lhs.sizeBytes < rhs.sizeBytes : lhs.sizeBytes > rhs.sizeBytes
         case .lastUsed:
             let l = lhs.lastUsed ?? .distantPast
             let r = rhs.lastUsed ?? .distantPast
-            return l > r
+            return ascending ? l < r : l > r
         case .apps:
             if lhs.appCount == rhs.appCount {
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                let result = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                return ascending ? result == .orderedAscending : result == .orderedDescending
             }
-            return lhs.appCount > rhs.appCount
-        case .name:
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            return ascending ? lhs.appCount < rhs.appCount : lhs.appCount > rhs.appCount
+        }
+    }
+
+    private func toggleSort(_ option: SortOption) {
+        if sortOption == option {
+            sortAscending.toggle()
+        } else {
+            sortOption = option
+            sortAscending = option.defaultAscending
         }
     }
 
@@ -610,66 +658,48 @@ private struct SimulatorRow: View {
     let isSelected: Bool
     let appIcons: [SimulatorApp]
     let onSelect: () -> Void
-    let onReveal: () -> Void
-    let onDelete: () -> Void
-    let isDeleting: Bool
+    let sizeWidth: CGFloat
+    let lastUsedWidth: CGFloat
+    let appsWidth: CGFloat
 
     var body: some View {
         Button(action: onSelect) {
             HStack(alignment: .center, spacing: 12) {
-                DeviceIconView(device: device)
-                    .frame(width: 56, height: 56)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(device.name)
-                        .font(.headline)
-                    HStack(spacing: 8) {
-                        Text(device.runtime)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        if device.isDefault {
-                            Tag(text: "Default")
+                HStack(spacing: 12) {
+                    DeviceIconView(device: device, size: 32)
+                        .frame(width: 56, height: 56)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(device.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                        HStack(spacing: 8) {
+                            Text(device.runtime)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
                     }
-                    Label(device.lastUsedDescription, systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text(device.sizeDescription)
-                        .font(.callout)
-                        .fontWeight(.semibold)
-                    HStack(spacing: 6) {
-                        ForEach(appIcons) { app in
-                            AppIconView(app: app)
-                                .frame(width: 22, height: 22)
-                                .cornerRadius(6)
-                        }
-                    }
-                    HStack(spacing: 8) {
-                        Button {
-                            onReveal()
-                        } label: {
-                            Image(systemName: "folder")
-                        }
-                        .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Button {
-                            onDelete()
-                        } label: {
-                            if isDeleting {
-                                ProgressView()
-                                    .controlSize(.mini)
-                            } else {
-                                Image(systemName: "trash")
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.red)
-                        .disabled(isDeleting)
+                Text(device.sizeDescription)
+                    .font(.callout.weight(.semibold))
+                    .frame(width: sizeWidth, alignment: .trailing)
+
+                Text(device.lastUsedDescription)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: lastUsedWidth, alignment: .leading)
+
+                HStack(spacing: 6) {
+                    ForEach(appIcons) { app in
+                        AppIconView(app: app)
+                            .frame(width: 22, height: 22)
+                            .cornerRadius(6)
                     }
-                    .font(.caption)
                 }
+                .frame(width: appsWidth, alignment: .leading)
             }
             .padding(12)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -843,6 +873,12 @@ private struct DestructiveActionButton: View {
 
 struct DeviceIconView: View {
     let device: SimulatorDevice
+    let size: CGFloat
+    
+    init(device: SimulatorDevice, size: CGFloat) {
+        self.device = device
+        self.size = size
+    }
 
     var body: some View {
         let visual = DeviceIcon.for(category: device.category)
@@ -852,7 +888,7 @@ struct DeviceIconView: View {
             Image(systemName: visual.symbol)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 36, height: 36)
+                .frame(width: size, height: size)
                 .foregroundStyle(visual.foreground)
         }
     }
@@ -907,19 +943,26 @@ struct AppIconView: View {
 }
 
 enum SortOption: String, CaseIterable, Identifiable {
+    case type
     case size
     case lastUsed
     case apps
-    case name
 
     var id: Self { self }
 
     var title: String {
         switch self {
+        case .type: return "Тип"
         case .size: return "Размер"
         case .lastUsed: return "Последний запуск"
-        case .apps: return "По приложениям"
-        case .name: return "Имя"
+        case .apps: return "Приложения"
+        }
+    }
+
+    var defaultAscending: Bool {
+        switch self {
+        case .type: return true
+        case .size, .lastUsed, .apps: return false
         }
     }
 }
