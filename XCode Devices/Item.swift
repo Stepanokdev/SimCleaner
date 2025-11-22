@@ -14,6 +14,11 @@ struct SimulatorApp: Identifiable, Hashable {
     let name: String
     let path: URL
     let icon: URL?
+    let sizeBytes: Int64
+
+    var sizeDescription: String {
+        ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
+    }
 }
 
 struct SimulatorDevice: Identifiable, Hashable {
@@ -81,6 +86,8 @@ enum DeviceCategory: String, CaseIterable, Identifiable {
 final class DeviceScanner: ObservableObject {
     @Published var devices: [SimulatorDevice] = []
     @Published var totalSizeBytes: Int64 = 0
+    @Published var diskTotalBytes: Int64 = 0
+    @Published var diskAvailableBytes: Int64 = 0
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
 
@@ -97,15 +104,20 @@ final class DeviceScanner: ObservableObject {
         Task.detached(priority: .userInitiated) { [devicesURL] in
             do {
                 let result = try DeviceScanner.loadDevices(at: devicesURL)
+                let disk = DeviceScanner.fetchDiskInfo(for: devicesURL)
                 await MainActor.run {
                     self.devices = result.devices
                     self.totalSizeBytes = result.totalSizeBytes
+                    self.diskTotalBytes = disk.total
+                    self.diskAvailableBytes = disk.available
                     self.isLoading = false
                 }
             } catch {
                 await MainActor.run {
                     self.devices = []
                     self.totalSizeBytes = 0
+                    self.diskTotalBytes = 0
+                    self.diskAvailableBytes = 0
                     self.errorMessage = error.localizedDescription
                     self.isLoading = false
                 }
@@ -125,6 +137,9 @@ final class DeviceScanner: ObservableObject {
 
             self.devices = result.devices
             self.totalSizeBytes = result.totalSizeBytes
+            let disk = DeviceScanner.fetchDiskInfo(for: devicesURL)
+            self.diskTotalBytes = disk.total
+            self.diskAvailableBytes = disk.available
             self.isLoading = false
         } catch {
             self.errorMessage = error.localizedDescription
@@ -279,7 +294,8 @@ final class DeviceScanner: ObservableObject {
             for bundle in bundles where bundle.pathExtension == "app" {
                 let name = bundle.deletingPathExtension().lastPathComponent
                 let icon = findAppIcon(in: bundle)
-                apps.append(SimulatorApp(name: name, path: bundle, icon: icon))
+                let size = directorySize(at: bundle)
+                apps.append(SimulatorApp(name: name, path: bundle, icon: icon, sizeBytes: size))
 
                 if let mod = bundle.contentModificationDate, let currentNewest = newestDate {
                     if mod > currentNewest { newestDate = mod }
@@ -377,6 +393,17 @@ final class DeviceScanner: ObservableObject {
         var format = PropertyListSerialization.PropertyListFormat.binary
         guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: &format) as? [String: Any] else { return nil }
         return plist["lastBootedAt"] as? Date
+    }
+
+    nonisolated static func fetchDiskInfo(for path: URL) -> (total: Int64, available: Int64) {
+        let fm = FileManager.default
+        guard let values = try? fm.attributesOfFileSystem(forPath: path.path) else {
+            return (0, 0)
+        }
+
+        let total = (values[.systemSize] as? NSNumber)?.int64Value ?? 0
+        let free = (values[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
+        return (total, free)
     }
 }
 
