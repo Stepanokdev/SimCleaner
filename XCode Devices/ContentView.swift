@@ -429,23 +429,43 @@ struct ContentView: View {
     }
 
     private var storagePanel: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+        let nonEmptySegments = storageSegments.filter { !$0.isEmpty }
+        let emptySegments = storageSegments.filter { $0.isEmpty }
+        let emptyShareOfDisk = emptySegments.reduce(0) { $0 + $1.shareOfDisk }
+
+        let legendItems: [LegendItem] = {
+            var items: [LegendItem] = nonEmptySegments.enumerated().map { index, segment in
+                LegendItem(id: segment.id, name: segment.name, color: StorageBar.color(forIndex: index))
+            }
+            if emptyShareOfDisk > 0, let largestEmpty = emptySegments.max(by: { $0.sizeBytes < $1.sizeBytes }) {
+                items.append(LegendItem(id: largestEmpty.id, name: "Пустые", color: Color(nsColor: .systemGray)))
+            }
+            return items
+        }()
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
                 Text("Хранилище симуляторов")
                     .font(.headline)
-                StorageBar(
-                    segments: storageSegments,
-                    freeShare: freeDiskShare
-                ) { id in
-                    pendingScrollID = id
-                    selectedDeviceID = id
-                }
-                .frame(height: 26)
+                Spacer()
+                Text(storageSummary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
-            Spacer()
-            Text(storageSummary)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+
+            StorageBar(
+                segments: storageSegments,
+                freeShare: freeDiskShare
+            ) { id in
+                pendingScrollID = id
+                selectedDeviceID = id
+            }
+            .frame(height: 32)
+            .padding(.trailing, 12)
+
+            if !legendItems.isEmpty {
+                Legend(items: legendItems)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -497,7 +517,8 @@ struct ContentView: View {
                     name: device.name,
                     sizeBytes: device.sizeBytes,
                     shareOfDisk: Double(device.sizeBytes) / totalDisk,
-                    shareOfSims: Double(device.sizeBytes) / totalSims
+                    shareOfSims: Double(device.sizeBytes) / totalSims,
+                    isEmpty: device.appCount == 0
                 )
             }
     }
@@ -722,6 +743,7 @@ private struct StorageSegment: Identifiable {
     let sizeBytes: Int64
     let shareOfDisk: Double
     let shareOfSims: Double
+    let isEmpty: Bool
 
     var sizeDescription: String {
         ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
@@ -737,35 +759,161 @@ private struct StorageBar: View {
     let freeShare: Double
     let onSelect: (String) -> Void
 
+    private struct BarItem: Identifiable {
+        let id: String
+        let share: Double
+        let minWidth: CGFloat
+        let color: Color
+        let help: String?
+        let tapID: String?
+    }
+
     var body: some View {
         GeometryReader { geometry in
             let totalWidth = geometry.size.width
-            HStack(spacing: 2) {
-                ForEach(Array(segments.enumerated()), id: \.1.id) { index, segment in
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(color(for: segment, index: index, total: segments.count))
-                        .frame(width: max(totalWidth * segment.shareOfDisk, 3), height: 18)
-                        .help("\(segment.name) • \(segment.sizeDescription) • \(segment.percentOfSims)%")
-                        .onTapGesture {
-                            onSelect(segment.id)
-                        }
+            let nonEmptySegments = segments.filter { !$0.isEmpty }
+            let emptySegments = segments.filter { $0.isEmpty }
+            let emptyShareOfDisk = emptySegments.reduce(0) { $0 + $1.shareOfDisk }
+            let emptyShareOfSims = emptySegments.reduce(0) { $0 + $1.shareOfSims }
+            let emptySizeBytes = emptySegments.reduce(0) { $0 + $1.sizeBytes }
+            let emptyTargetID = emptySegments.max { $0.sizeBytes < $1.sizeBytes }?.id
+
+            let items: [BarItem] = {
+                var all = nonEmptySegments.enumerated().map { index, segment in
+                    BarItem(
+                        id: segment.id,
+                        share: segment.shareOfDisk,
+                        minWidth: 3,
+                        color: StorageBar.color(forIndex: index),
+                        help: "\(segment.name) • \(segment.sizeDescription) • \(segment.percentOfSims)%",
+                        tapID: segment.id
+                    )
+                }
+
+                if emptyShareOfDisk > 0 {
+                    all.append(
+                        BarItem(
+                            id: "empty",
+                            share: emptyShareOfDisk,
+                            minWidth: 8,
+                            color: Color(nsColor: .systemGray),
+                            help: "Пустые симуляторы • \(formatBytes(emptySizeBytes)) • \((emptyShareOfSims * 100).formatted(.number.precision(.fractionLength(1))))%",
+                            tapID: emptyTargetID
+                        )
+                    )
                 }
 
                 if freeShare > 0 {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.gray.opacity(0.25))
-                        .frame(width: max(totalWidth * freeShare, 8), height: 18)
+                    all.append(
+                        BarItem(
+                            id: "free",
+                            share: freeShare,
+                            minWidth: 8,
+                            color: Color.gray.opacity(0.25),
+                            help: nil,
+                            tapID: nil
+                        )
+                    )
+                }
+
+                return all
+            }()
+
+            HStack(spacing: 1) {
+                ForEach(Array(items.enumerated()), id: \.1.id) { index, item in
+                    Rectangle()
+                        .fill(item.color)
+                        .frame(width: max(totalWidth * item.share, item.minWidth), height: 22)
+                        .optionalHelp(item.help)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard let tapID = item.tapID else { return }
+                            onSelect(tapID)
+                        }
+                        .mask(cornerMask(for: index, lastIndex: items.count - 1))
                 }
             }
         }
     }
 
-    private func color(for segment: StorageSegment, index: Int, total: Int) -> Color {
-        if segment.shareOfSims < 0.01 {
-            return Color.gray.opacity(0.3)
+    @ViewBuilder
+    private func cornerMask(for index: Int, lastIndex: Int) -> some View {
+        let isFirst = index == 0
+        let isLast = index == lastIndex
+
+        if isFirst || isLast {
+            UnevenRoundedRectangle(
+                topLeadingRadius: isFirst ? 4 : 0,
+                bottomLeadingRadius: isFirst ? 4 : 0,
+                bottomTrailingRadius: isLast ? 4 : 0,
+                topTrailingRadius: isLast ? 4 : 0
+            )
+        } else {
+            Rectangle()
         }
-        let intensity = 0.4 + (0.4 * (1 - Double(index) / Double(max(total - 1, 1))))
-        return Color(hue: 0.59, saturation: intensity, brightness: 0.9)
+    }
+
+    static func color(forIndex index: Int) -> Color {
+        let palette = macPalette
+        return palette[index % palette.count]
+    }
+
+    private func formatBytes(_ value: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+    }
+
+    private static let macPalette: [Color] = [
+        Color(nsColor: .systemRed),
+        Color(nsColor: .systemOrange),
+        Color(nsColor: .systemYellow),
+        Color(nsColor: .systemGreen),
+        Color(nsColor: .systemMint),
+        Color(nsColor: .systemTeal),
+        Color(nsColor: .systemCyan),
+        Color(nsColor: .systemBlue),
+        Color(nsColor: .systemIndigo),
+        Color(nsColor: .systemPurple),
+        Color(nsColor: .systemPink),
+        Color(nsColor: .systemBrown),
+        Color(nsColor: .systemGray)
+    ]
+}
+
+private struct LegendItem: Identifiable {
+    let id: String
+    let name: String
+    let color: Color
+}
+
+private struct Legend: View {
+    let items: [LegendItem]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .center, spacing: 14) {
+                ForEach(items) { item in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(item.color)
+                            .frame(width: 10, height: 10)
+                        Text(item.name)
+                            .font(.caption)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func optionalHelp(_ text: String?) -> some View {
+        if let text, !text.isEmpty {
+            self.help(text)
+        } else {
+            self
+        }
     }
 }
 
