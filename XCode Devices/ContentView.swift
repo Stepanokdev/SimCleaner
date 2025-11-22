@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var deletionInProgress: String?
     @State private var pendingScrollID: String?
     @State private var sortAscending: Bool = SortOption.size.defaultAscending
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     private let sizeColumnWidth: CGFloat = 90
     private let lastUsedColumnWidth: CGFloat = 150
@@ -27,168 +28,177 @@ struct ContentView: View {
     private let recentThreshold: TimeInterval = 60 * 60 * 24 * 14
 
     var body: some View {
-        NavigationStack {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
+        } content: {
+            ScrollViewReader { proxy in
+                simulatorList(proxy: proxy)
+                    .onChange(of: pendingScrollID, initial: false) { _, id in
+                        guard let id else { return }
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                        pendingScrollID = nil
+                    }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .controlBackgroundColor))
+        } detail: {
+            detailPanel
+                .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .safeAreaInset(edge: .bottom) {
             VStack(spacing: 0) {
-                mainLayout
                 Divider()
                 storagePanel
             }
-            .background(Color(nsColor: .controlBackgroundColor))
-            .onAppear {
-                if viewModel.devices.isEmpty {
-                    viewModel.refresh()
-                }
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+//        .toolbar {
+//            ToolbarItemGroup(placement: .navigation) {
+//                Button {
+//                    toggleSidebar()
+//                } label: {
+//                    Label("Скрыть/показать фильтры", systemImage: "sidebar.leading")
+//                }
+//            }
+//        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .onAppear {
+            if viewModel.devices.isEmpty {
+                viewModel.refresh()
             }
-            .onChange(of: filteredDeviceIDs, initial: false) { _, ids in
-                if let current = selectedDeviceID, ids.contains(current) {
-                    return
-                }
-                selectedDeviceID = ids.first
+        }
+        .onChange(of: filteredDeviceIDs, initial: false) { _, ids in
+            if let current = selectedDeviceID, ids.contains(current) {
+                return
             }
-            .alert(
-                "Удалить симулятор?",
-                isPresented: $showDeleteConfirmation,
-                presenting: devicePendingDeletion
-            ) { device in
-                Button("Удалить", role: .destructive) {
-                    deletionInProgress = device.udid
-                    Task {
-                        await viewModel.delete(device: device)
-                        deletionInProgress = nil
-                        devicePendingDeletion = nil
-                    }
-                }
-                Button("Отмена", role: .cancel) {
+            selectedDeviceID = ids.first
+        }
+        .alert(
+            "Удалить симулятор?",
+            isPresented: $showDeleteConfirmation,
+            presenting: devicePendingDeletion
+        ) { device in
+            Button("Удалить", role: .destructive) {
+                deletionInProgress = device.udid
+                Task {
+                    await viewModel.delete(device: device)
+                    deletionInProgress = nil
                     devicePendingDeletion = nil
                 }
-            } message: { device in
-                Text("\(device.name)\n\(device.runtime)\nUDID: \(device.udid)")
             }
-        }
-    }
-
-
-    private var mainLayout: some View {
-        HStack(spacing: 0) {
-            sidebar
-            Divider()
-            ScrollViewReader { proxy in
-                HStack(spacing: 0) {
-                    simulatorList(proxy: proxy)
-                    Divider()
-                    detailPanel
-                }
-                .onChange(of: pendingScrollID, initial: false) { _, id in
-                    guard let id else { return }
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                        proxy.scrollTo(id, anchor: .center)
-                    }
-                    pendingScrollID = nil
-                }
+            Button("Отмена", role: .cancel) {
+                devicePendingDeletion = nil
             }
+        } message: { device in
+            Text("\(device.name)\n\(device.runtime)\nUDID: \(device.udid)")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var sidebar: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 16) {
-            sidebarSection(title: "Устройства") {
-                sidebarRow(
-                    title: "Все устройства",
-                    subtitle: "\(viewModel.devices.count)",
-                    systemImage: "tray.full",
-                    isSelected: selectedFilter == .all
-                ) { selectedFilter = .all }
-
-                sidebarRow(
-                    title: "iPhone",
-                    subtitle: "\(count(for: .category(.iPhone)))",
-                    systemImage: "iphone",
-                    isSelected: selectedFilter == .category(.iPhone)
-                ) { selectedFilter = .category(.iPhone) }
-
-                sidebarRow(
-                    title: "iPad",
-                    subtitle: "\(count(for: .category(.iPad)))",
-                    systemImage: "ipad",
-                    isSelected: selectedFilter == .category(.iPad)
-                ) { selectedFilter = .category(.iPad) }
-
-                sidebarRow(
-                    title: "tvOS",
-                    subtitle: "\(count(for: .category(.TV)))",
-                    systemImage: "appletv",
-                    isSelected: selectedFilter == .category(.TV)
-                ) { selectedFilter = .category(.TV) }
-
-                sidebarRow(
-                    title: "watchOS",
-                    subtitle: "\(count(for: .category(.Watch)))",
-                    systemImage: "applewatch",
-                    isSelected: selectedFilter == .category(.Watch)
-                ) { selectedFilter = .category(.Watch) }
-
-                sidebarRow(
-                    title: "visionOS",
-                    subtitle: "\(count(for: .category(.Vision)))",
-                    systemImage: "visionpro",
-                    isSelected: selectedFilter == .category(.Vision)
-                ) { selectedFilter = .category(.Vision) }
-            }
-
-            sidebarSection(title: "Версии iOS") {
-                if runtimeFilters.isEmpty {
-                    Text("Нет найденных версий.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                } else {
-                    ForEach(runtimeFilters) { runtime in
-                        sidebarRow(
-                            title: runtime.runtime,
-                            subtitle: "\(runtime.count)",
-                            systemImage: "chevron.right.circle",
-                            isSelected: selectedFilter == .runtime(runtime.runtime)
-                        ) { selectedFilter = .runtime(runtime.runtime) }
+                sidebarSection(title: "Устройства") {
+                    sidebarRow(
+                        title: "Все устройства",
+                        subtitle: "\(viewModel.devices.count)",
+                        systemImage: "tray.full",
+                        isSelected: selectedFilter == .all
+                    ) { selectedFilter = .all }
+                    
+                    sidebarRow(
+                        title: "iPhone",
+                        subtitle: "\(count(for: .category(.iPhone)))",
+                        systemImage: "iphone",
+                        isSelected: selectedFilter == .category(.iPhone)
+                    ) { selectedFilter = .category(.iPhone) }
+                    
+                    sidebarRow(
+                        title: "iPad",
+                        subtitle: "\(count(for: .category(.iPad)))",
+                        systemImage: "ipad",
+                        isSelected: selectedFilter == .category(.iPad)
+                    ) { selectedFilter = .category(.iPad) }
+                    
+                    sidebarRow(
+                        title: "tvOS",
+                        subtitle: "\(count(for: .category(.TV)))",
+                        systemImage: "appletv",
+                        isSelected: selectedFilter == .category(.TV)
+                    ) { selectedFilter = .category(.TV) }
+                    
+                    sidebarRow(
+                        title: "watchOS",
+                        subtitle: "\(count(for: .category(.Watch)))",
+                        systemImage: "applewatch",
+                        isSelected: selectedFilter == .category(.Watch)
+                    ) { selectedFilter = .category(.Watch) }
+                    
+                    sidebarRow(
+                        title: "visionOS",
+                        subtitle: "\(count(for: .category(.Vision)))",
+                        systemImage: "visionpro",
+                        isSelected: selectedFilter == .category(.Vision)
+                    ) { selectedFilter = .category(.Vision) }
+                }
+                
+                sidebarSection(title: "Версии iOS") {
+                    if runtimeFilters.isEmpty {
+                        Text("Нет найденных версий.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                    } else {
+                        ForEach(runtimeFilters) { runtime in
+                            sidebarRow(
+                                title: runtime.runtime,
+                                subtitle: "\(runtime.count)",
+                                systemImage: "chevron.right.circle",
+                                isSelected: selectedFilter == .runtime(runtime.runtime)
+                            ) { selectedFilter = .runtime(runtime.runtime) }
+                        }
                     }
                 }
+                
+                sidebarSection(title: "Статусы") {
+                    sidebarRow(
+                        title: "Недавно использованные",
+                        subtitle: "\(count(for: .recentlyUsed))",
+                        systemImage: "clock.badge.checkmark",
+                        isSelected: selectedFilter == .recentlyUsed
+                    ) { selectedFilter = .recentlyUsed }
+                    
+                    sidebarRow(
+                        title: "Не запускались",
+                        subtitle: "\(count(for: .neverLaunched))",
+                        systemImage: "sparkles.rectangle.stack",
+                        isSelected: selectedFilter == .neverLaunched
+                    ) { selectedFilter = .neverLaunched }
+                    
+                    sidebarRow(
+                        title: "С приложениями",
+                        subtitle: "\(count(for: .withApps))",
+                        systemImage: "square.stack.3d.up.fill",
+                        isSelected: selectedFilter == .withApps
+                    ) { selectedFilter = .withApps }
+                    
+                    sidebarRow(
+                        title: "Пустые",
+                        subtitle: "\(count(for: .empty))",
+                        systemImage: "tray",
+                        isSelected: selectedFilter == .empty
+                    ) { selectedFilter = .empty }
+                }
+                Spacer(minLength: 160)
             }
-
-            sidebarSection(title: "Статусы") {
-                sidebarRow(
-                    title: "Недавно использованные",
-                    subtitle: "\(count(for: .recentlyUsed))",
-                    systemImage: "clock.badge.checkmark",
-                    isSelected: selectedFilter == .recentlyUsed
-                ) { selectedFilter = .recentlyUsed }
-
-                sidebarRow(
-                    title: "Не запускались",
-                    subtitle: "\(count(for: .neverLaunched))",
-                    systemImage: "sparkles.rectangle.stack",
-                    isSelected: selectedFilter == .neverLaunched
-                ) { selectedFilter = .neverLaunched }
-
-                sidebarRow(
-                    title: "С приложениями",
-                    subtitle: "\(count(for: .withApps))",
-                    systemImage: "square.stack.3d.up.fill",
-                    isSelected: selectedFilter == .withApps
-                ) { selectedFilter = .withApps }
-
-                sidebarRow(
-                    title: "Пустые",
-                    subtitle: "\(count(for: .empty))",
-                    systemImage: "tray",
-                    isSelected: selectedFilter == .empty
-                ) { selectedFilter = .empty }
-            }
-            Spacer()
+            .padding(16)
+            .frame(width: 240, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
-        .padding(16)
-        .frame(width: 240, alignment: .topLeading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func sidebarSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -285,6 +295,7 @@ struct ContentView: View {
                             }
                             .padding(12)
                         }
+                        Spacer(minLength: 160)
                     }
                 }
             }
@@ -326,112 +337,112 @@ struct ContentView: View {
     }
 
     private var detailPanel: some View {
-        VStack(alignment: .center, spacing: 16) {
-            if let device = selectedDevice {
-                VStack(spacing: 14) {
-                    DeviceIconView(device: device, size: 64)
-                        .frame(width: 90, height: 120)
-                    VStack(spacing: 4) {
-                        Text(device.name)
-                            .font(.title3.bold())
-                        Text(device.runtime)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Text(device.deviceType)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                VStack(spacing: 10) {
-                    PrimaryActionButton(title: "Запустить симулятор", systemImage: "play.fill") {
-                        runSimulator(device)
-                    }
-                    
-                    SecondaryActionButton(title: "Открыть контейнер", systemImage: "folder") {
-                        revealFolder(device.rootPath)
-                    }
-                    
-                    DestructiveActionButton(
-                        title: deletionInProgress == device.udid ? "Удаление..." : "Удалить",
-                        systemImage: "trash",
-                        isDisabled: deletionInProgress == device.udid
-                    ) {
-                        devicePendingDeletion = device
-                        showDeleteConfirmation = true
-                    }
-                }
-                .padding(.top, 4)
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Использование хранилища")
-                        .font(.headline)
-                    ProgressView(value: Double(device.sizeBytes), total: Double(max(viewModel.totalSizeBytes, 1)))
-                        .tint(.blue)
-                    HStack {
-                        Text("\(device.sizeDescription) использовано")
-                        Spacer()
-                        let free = max(viewModel.totalSizeBytes - device.sizeBytes, 0)
-                        Text("\(formatBytes(free)) у других")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 10)
-                
-                VStack(alignment: .leading, spacing: 10) {
-                    if !device.apps.isEmpty {
-                        Text("Установленные приложения")
-                            .font(.headline)
-                    }
-                    if device.apps.isEmpty {
-                        Text("Нет приложений внутри симулятора.")
-                            .foregroundStyle(.secondary)
-                            .font(.callout)
-                            .padding(.top, 64)
-                    } else {
-                        ScrollView {
-                        ForEach(device.apps.sorted { $0.sizeBytes > $1.sizeBytes }) { app in
-                            HStack(spacing: 10) {
-                                AppIconView(app: app)
-                                    .frame(width: 26, height: 26)
-                                    .cornerRadius(6)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(app.name)
-                                        .font(.subheadline)
-                                    Text(app.sizeDescription)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                            }
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.gray.opacity(0.06))
-                            )
+        ScrollView {
+            VStack(alignment: .center, spacing: 16) {
+                if let device = selectedDevice {
+                    VStack(spacing: 14) {
+                        DeviceIconView(device: device, size: 64)
+                            .frame(width: 90, height: 120)
+                        VStack(spacing: 4) {
+                            Text(device.name)
+                                .font(.title3.bold())
+                            Text(device.runtime)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text(device.deviceType)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                            Spacer(minLength: 78)
                     }
-                }
-                
-            }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Выберите симулятор")
-                        .font(.headline)
-                    Text("Кликните на устройство или сегмент хранилища снизу, чтобы увидеть детали.")
-                        .font(.callout)
+                    
+                    VStack(spacing: 10) {
+                        PrimaryActionButton(title: "Запустить симулятор", systemImage: "play.fill") {
+                            runSimulator(device)
+                        }
+                        
+                        SecondaryActionButton(title: "Открыть контейнер", systemImage: "folder") {
+                            revealFolder(device.rootPath)
+                        }
+                        
+                        DestructiveActionButton(
+                            title: deletionInProgress == device.udid ? "Удаление..." : "Удалить",
+                            systemImage: "trash",
+                            isDisabled: deletionInProgress == device.udid
+                        ) {
+                            devicePendingDeletion = device
+                            showDeleteConfirmation = true
+                        }
+                    }
+                    .padding(.top, 4)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Использование хранилища")
+                            .font(.headline)
+                        ProgressView(value: Double(device.sizeBytes), total: Double(max(viewModel.totalSizeBytes, 1)))
+                            .tint(.blue)
+                        HStack {
+                            Text("\(device.sizeDescription) использовано")
+                            Spacer()
+                            let free = max(viewModel.totalSizeBytes - device.sizeBytes, 0)
+                            Text("\(formatBytes(free)) у других")
+                        }
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 10)
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        if !device.apps.isEmpty {
+                            Text("Установленные приложения")
+                                .font(.headline)
+                        }
+                        if device.apps.isEmpty {
+                            Text("Нет приложений внутри симулятора.")
+                                .foregroundStyle(.secondary)
+                                .font(.callout)
+                                .padding(.top, 64)
+                        } else {
+                            ForEach(device.apps.sorted { $0.sizeBytes > $1.sizeBytes }) { app in
+                                HStack(spacing: 10) {
+                                    AppIconView(app: app)
+                                        .frame(width: 26, height: 26)
+                                        .cornerRadius(6)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(app.name)
+                                            .font(.subheadline)
+                                        Text(app.sizeDescription)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color.gray.opacity(0.06))
+                                )
+                            }
+                            Spacer(minLength: 160)
+                        }
+                        
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Выберите симулятор")
+                            .font(.headline)
+                        Text("Кликните на устройство или сегмент хранилища снизу, чтобы увидеть детали.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+            .padding(20)
+            .frame(width: 360, alignment: .top)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
-        .padding(20)
-        .frame(width: 360, alignment: .top)
-        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var storagePanel: some View {
@@ -655,6 +666,10 @@ struct ContentView: View {
             sortOption = option
             sortAscending = option.defaultAscending
         }
+    }
+
+    private func toggleSidebar() {
+        NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
     }
 
     private func revealFolder(_ url: URL) {
