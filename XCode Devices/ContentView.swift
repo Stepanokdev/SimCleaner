@@ -265,7 +265,7 @@ struct ContentView: View {
                     Table(sortedDevices, selection: tableSelection, sortOrder: $sortOrder) {
                         TableColumn("Тип", value: \.deviceType) { device in
                             HStack(spacing: 12) {
-                                DeviceIconView(device: device, size: 32)
+                                DeviceIconView(device: device, size: 32, weight: .medium)
                                     .frame(width: 56, height: 56)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(device.name)
@@ -314,6 +314,7 @@ struct ContentView: View {
                         }
                         .width(appsColumnWidth)
                     }
+                    .safeAreaPadding(EdgeInsets(top: 0, leading: 0, bottom: 100, trailing: 0))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .tableStyle(.inset(alternatesRowBackgrounds: true))
                 }
@@ -370,7 +371,7 @@ struct ContentView: View {
                         .padding(-28)
                         
                         VStack(spacing: 14) {
-                            DeviceIconView(device: device, size: 64)
+                            DeviceIconView(device: device, size: 128, weight: .ultraLight)
                                 .frame(width: 90, height: 120)
                             VStack(spacing: 4) {
                                 Text(device.name)
@@ -954,10 +955,12 @@ private struct DestructiveActionButton: View {
 struct DeviceIconView: View {
     let device: SimulatorDevice
     let size: CGFloat
+    let weight: Font.Weight
     
-    init(device: SimulatorDevice, size: CGFloat) {
+    init(device: SimulatorDevice, size: CGFloat, weight: Font.Weight) {
         self.device = device
         self.size = size
+        self.weight = weight
     }
 
     var body: some View {
@@ -970,6 +973,7 @@ struct DeviceIconView: View {
                 .scaledToFit()
                 .frame(width: size, height: size)
                 .foregroundStyle(visual.foreground)
+                .fontWeight(weight)
         }
     }
 }
