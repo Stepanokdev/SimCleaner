@@ -271,7 +271,8 @@ struct ContentView: View {
                                     SimulatorRow(
                                         device: device,
                                         isSelected: device.id == selectedDevice?.id,
-                                        appIcons: Array(device.apps.prefix(8)),
+                                        appIcons: Array(device.apps.prefix(4)),
+                                        totalAppsCount: device.appCount,
                                         onSelect: {
                                             selectDevice(device)
                                         },
@@ -341,16 +342,16 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-
+                
                 VStack(spacing: 10) {
                     PrimaryActionButton(title: "Запустить симулятор", systemImage: "play.fill") {
                         runSimulator(device)
                     }
-
+                    
                     SecondaryActionButton(title: "Открыть контейнер", systemImage: "folder") {
                         revealFolder(device.rootPath)
                     }
-
+                    
                     DestructiveActionButton(
                         title: deletionInProgress == device.udid ? "Удаление..." : "Удалить",
                         systemImage: "trash",
@@ -361,7 +362,7 @@ struct ContentView: View {
                     }
                 }
                 .padding(.top, 4)
-
+                
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Использование хранилища")
                         .font(.headline)
@@ -378,15 +379,19 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 10)
-
+                
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Установленные приложения")
-                        .font(.headline)
+                    if !device.apps.isEmpty {
+                        Text("Установленные приложения")
+                            .font(.headline)
+                    }
                     if device.apps.isEmpty {
                         Text("Нет приложений внутри симулятора.")
                             .foregroundStyle(.secondary)
                             .font(.callout)
+                            .padding(.top, 64)
                     } else {
+                        ScrollView {
                         ForEach(device.apps.sorted { $0.sizeBytes > $1.sizeBytes }) { app in
                             HStack(spacing: 10) {
                                 AppIconView(app: app)
@@ -408,10 +413,11 @@ struct ContentView: View {
                                     .fill(Color.gray.opacity(0.06))
                             )
                         }
+                            Spacer(minLength: 78)
                     }
                 }
-
-                Spacer()
+                
+            }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Выберите симулятор")
@@ -678,6 +684,7 @@ private struct SimulatorRow: View {
     let device: SimulatorDevice
     let isSelected: Bool
     let appIcons: [SimulatorApp]
+    let totalAppsCount: Int
     let onSelect: () -> Void
     let sizeWidth: CGFloat
     let lastUsedWidth: CGFloat
@@ -713,11 +720,20 @@ private struct SimulatorRow: View {
                     .lineLimit(1)
                     .frame(width: lastUsedWidth, alignment: .leading)
 
-                HStack(spacing: 6) {
-                    ForEach(appIcons) { app in
-                        AppIconView(app: app)
-                            .frame(width: 22, height: 22)
-                            .cornerRadius(6)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        ForEach(appIcons) { app in
+                            AppIconView(app: app)
+                                .frame(width: 22, height: 22)
+                                .cornerRadius(6)
+                        }
+                    }
+
+                    if remainingApps > 0 {
+                        Text("and \(remainingApps) more")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
                 .frame(width: appsWidth, alignment: .leading)
@@ -734,6 +750,10 @@ private struct SimulatorRow: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(isSelected ? Color.accentColor : Color.gray.opacity(0.1), lineWidth: 1)
         )
+    }
+
+    private var remainingApps: Int {
+        max(totalAppsCount - appIcons.count, 0)
     }
 }
 
@@ -1073,7 +1093,7 @@ struct AppIconView: View {
             if let iconURL = app.icon, let img = NSImage(contentsOf: iconURL) {
                 return img
             }
-            return NSWorkspace.shared.icon(forFile: app.path.path)
+            return nil
         }()
 
         if let image {
@@ -1083,9 +1103,15 @@ struct AppIconView: View {
                 .scaledToFit()
                 .cornerRadius(6)
         } else {
-            Image(systemName: "app.fill")
-                .resizable()
-                .scaledToFit()
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.blue)
+                Image(systemName: "app.grid")
+                    .resizable()
+                    .scaledToFit()
+                    .padding(4)
+                    .foregroundStyle(.white)
+            }
         }
     }
 }
