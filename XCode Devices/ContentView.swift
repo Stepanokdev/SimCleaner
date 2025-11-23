@@ -1150,7 +1150,7 @@ struct AppIconView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color.blue)
-                Image(systemName: "app.grid")
+                Image(.appGrid)
                     .resizable()
                     .scaledToFit()
                     .padding(4)
