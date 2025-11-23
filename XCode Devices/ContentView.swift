@@ -418,6 +418,7 @@ struct ContentView: View {
                         VStack(spacing: 14) {
                             DeviceIconView(device: device, size: 128, weight: .ultraLight)
                                 .frame(width: 90, height: 120)
+                                .padding(.top, 24)
                             VStack(spacing: 4) {
                                 Text(device.name)
                                     .font(.title3.bold())

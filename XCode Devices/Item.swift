@@ -96,9 +96,13 @@ final class DeviceScanner: ObservableObject {
 
     private var activeSecurityScopedURL: URL?
 
-    private static let devicesBookmarkKey = "SimulatorDevicesDirectoryBookmark"
     private static var defaultDevicesURL: URL {
         FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Developer/CoreSimulator/Devices")
+    }
+    nonisolated private static var bookmarkFileURL: URL? {
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        return appSupport.appending(path: "devices.bookmark")
     }
 
     init(devicesURL: URL? = nil) {
@@ -318,42 +322,8 @@ final class DeviceScanner: ObservableObject {
 
     private nonisolated static func performDelete(udids: [String], devicesRoot: URL) throws {
         guard !udids.isEmpty else { return }
-        print("performDelete launching xcrun simctl delete for: \(udids)")
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = ["simctl", "delete"] + udids
-
-        let errorPipe = Pipe()
-        let outputPipe = Pipe()
-        process.standardError = errorPipe
-        process.standardOutput = outputPipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        let stdoutData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-        print("simctl delete stdout: \(stdout.trimmingCharacters(in: .whitespacesAndNewlines))")
-        print("simctl delete stderr: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
-        print("simctl delete exit code: \(process.terminationStatus)")
-
-        if process.terminationStatus != 0 {
-            let sandboxBlocked = stderr.lowercased().contains("sandbox")
-            if sandboxBlocked {
-                print("simctl blocked by sandbox, attempting manual removal of device folders")
-                try deleteDeviceFolders(udids: udids, devicesRoot: devicesRoot)
-                return
-            }
-            let message = stderr.isEmpty ? "Unknown error" : stderr
-            let ids = udids.joined(separator: ", ")
-            throw NSError(
-                domain: "DeviceScanner",
-                code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to delete simulator(s) \(ids): \(message.trimmingCharacters(in: .whitespacesAndNewlines))"]
-            )
-        }
+        print("performDelete: deleting via FileManager for \(udids)")
+        try deleteDeviceFolders(udids: udids, devicesRoot: devicesRoot)
     }
 
     private nonisolated static func deleteDeviceFolders(udids: [String], devicesRoot: URL) throws {
@@ -532,7 +502,8 @@ final class DeviceScanner: ObservableObject {
     }
 
     private nonisolated static func restoreBookmarkedURL() -> URL? {
-        guard let data = UserDefaults.standard.data(forKey: devicesBookmarkKey) else { return nil }
+        guard let bookmarkLocation = bookmarkFileURL,
+              let data = try? Data(contentsOf: bookmarkLocation) else { return nil }
         var isStale = false
         do {
             let url = try URL(
@@ -542,7 +513,7 @@ final class DeviceScanner: ObservableObject {
                 bookmarkDataIsStale: &isStale
             )
             if isStale {
-                UserDefaults.standard.removeObject(forKey: devicesBookmarkKey)
+                try? FileManager.default.removeItem(at: bookmarkLocation)
                 return nil
             }
             return url
@@ -552,14 +523,25 @@ final class DeviceScanner: ObservableObject {
     }
 
     private nonisolated static func saveBookmark(for url: URL) {
+        guard let destination = bookmarkFileURL else { return }
+        let fm = FileManager.default
+        if let dir = destination.deletingLastPathComponent() as URL? {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
         guard let data = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) else {
             return
         }
-        UserDefaults.standard.set(data, forKey: devicesBookmarkKey)
+        do {
+            try data.write(to: destination, options: [.atomic])
+            print("Saved bookmark to \(destination.path)")
+        } catch {
+            print("Failed to save bookmark: \(error.localizedDescription)")
+        }
     }
 
     private nonisolated static func clearBookmark() {
-        UserDefaults.standard.removeObject(forKey: devicesBookmarkKey)
+        guard let destination = bookmarkFileURL else { return }
+        try? FileManager.default.removeItem(at: destination)
     }
 }
 
