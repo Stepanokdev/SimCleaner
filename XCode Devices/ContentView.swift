@@ -50,7 +50,7 @@ struct ContentView: View {
 //                Button {
 //                    toggleSidebar()
 //                } label: {
-//                    Label("Скрыть/показать фильтры", systemImage: "sidebar.leading")
+//                    Label("Show/Hide filters", systemImage: "sidebar.leading")
 //                }
 //            }
 //        }
@@ -67,11 +67,11 @@ struct ContentView: View {
             selectedDeviceID = ids.first
         }
         .alert(
-            "Удалить симулятор?",
+            "Delete simulator?",
             isPresented: $showDeleteConfirmation,
             presenting: devicePendingDeletion
         ) { device in
-            Button("Удалить", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 deletionInProgress = device.udid
                 Task {
                     await viewModel.delete(device: device)
@@ -79,7 +79,7 @@ struct ContentView: View {
                     devicePendingDeletion = nil
                 }
             }
-            Button("Отмена", role: .cancel) {
+            Button("Cancel", role: .cancel) {
                 devicePendingDeletion = nil
             }
         } message: { device in
@@ -90,9 +90,9 @@ struct ContentView: View {
     private var sidebar: some View {
         ScrollView {
         VStack(alignment: .leading, spacing: 16) {
-                sidebarSection(title: "Устройства") {
+                sidebarSection(title: "Devices") {
                     sidebarRow(
-                        title: "Все устройства",
+                        title: "All devices",
                         subtitle: "\(viewModel.devices.count)",
                         systemImage: "tray.full",
                         isSelected: selectedFilter == .all
@@ -134,9 +134,9 @@ struct ContentView: View {
                     ) { selectedFilter = .category(.Vision) }
                 }
                 
-                sidebarSection(title: "Версии iOS") {
+                sidebarSection(title: "iOS Versions") {
                     if runtimeFilters.isEmpty {
-                        Text("Нет найденных версий.")
+                        Text("No versions found.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 10)
@@ -152,30 +152,30 @@ struct ContentView: View {
                     }
                 }
                 
-                sidebarSection(title: "Статусы") {
+                sidebarSection(title: "Statuses") {
                     sidebarRow(
-                        title: "Недавно использованные",
+                        title: "Recently used",
                         subtitle: "\(count(for: .recentlyUsed))",
                         systemImage: "clock.badge.checkmark",
                         isSelected: selectedFilter == .recentlyUsed
                     ) { selectedFilter = .recentlyUsed }
                     
                     sidebarRow(
-                        title: "Не запускались",
+                        title: "Never launched",
                         subtitle: "\(count(for: .neverLaunched))",
                         systemImage: "sparkles.rectangle.stack",
                         isSelected: selectedFilter == .neverLaunched
                     ) { selectedFilter = .neverLaunched }
                     
                     sidebarRow(
-                        title: "С приложениями",
+                        title: "With apps",
                         subtitle: "\(count(for: .withApps))",
                         systemImage: "square.stack.3d.up.fill",
                         isSelected: selectedFilter == .withApps
                     ) { selectedFilter = .withApps }
                     
                     sidebarRow(
-                        title: "Пустые",
+                        title: "Empty",
                         subtitle: "\(count(for: .empty))",
                         systemImage: "tray",
                         isSelected: selectedFilter == .empty
@@ -240,7 +240,7 @@ struct ContentView: View {
                     VStack(spacing: 8) {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
-                        Text("Проверь путь и права доступа.")
+                        Text("Check the path and permissions.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -248,22 +248,22 @@ struct ContentView: View {
                 } else if viewModel.isLoading && viewModel.devices.isEmpty {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("Сканирование симуляторов...")
+                        Text("Scanning simulators...")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else if filteredDevices.isEmpty {
                     VStack(spacing: 8) {
-                        Label("Симуляторы не найдены", systemImage: "archivebox")
+                        Label("No simulators found", systemImage: "archivebox")
                             .foregroundStyle(.secondary)
-                        Text("Проверьте фильтры или обновите список.")
+                        Text("Check filters or refresh the list.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     Table(sortedDevices, selection: tableSelection, sortOrder: $sortOrder) {
-                        TableColumn("Тип", value: \.deviceType) { device in
+                        TableColumn("Type", value: \.deviceType) { device in
                             HStack(spacing: 12) {
                                 DeviceIconView(device: device, size: 32, weight: .medium)
                                     .frame(width: 56, height: 56)
@@ -279,13 +279,13 @@ struct ContentView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        TableColumn("Размер", value: \.sizeBytes) { device in
+                        TableColumn("Size", value: \.sizeBytes) { device in
                             Text(device.sizeDescription)
                                 .font(.callout.weight(.semibold))
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         .width(sizeColumnWidth)
-                        TableColumn("Последний запуск", value: \.lastUsedSortKey) { device in
+                        TableColumn("Last launch", value: \.lastUsedSortKey) { device in
                             Text(device.lastUsedDescription)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
@@ -293,7 +293,7 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .width(lastUsedColumnWidth)
-                        TableColumn("Приложения", value: \.appCount) { device in
+                        TableColumn("Apps", value: \.appCount) { device in
                             let appIcons = Array(device.apps.prefix(4))
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
@@ -326,15 +326,15 @@ struct ContentView: View {
     private var listHeader: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Симуляторы")
+                Text("Simulators")
                     .font(.headline)
-                Text("\(filteredDevices.count) из \(viewModel.devices.count) • \(formatBytes(viewModel.totalSizeBytes)) суммарно")
+                Text("\(filteredDevices.count) of \(viewModel.devices.count) • \(formatBytes(viewModel.totalSizeBytes)) total")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             HStack(spacing: 8) {
-                TextField("Поиск по имени, OS или UDID", text: $searchText)
+                TextField("Search by name, OS, or UDID", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 260)
                 Button {
@@ -387,16 +387,16 @@ struct ContentView: View {
                     }
                     
                     VStack(spacing: 10) {
-                        PrimaryActionButton(title: "Запустить симулятор", systemImage: "play.fill") {
+                        PrimaryActionButton(title: "Launch simulator", systemImage: "play.fill") {
                             runSimulator(device)
                         }
                         
-                        SecondaryActionButton(title: "Открыть контейнер", systemImage: "folder") {
+                        SecondaryActionButton(title: "Reveal container", systemImage: "folder") {
                             revealFolder(device.rootPath)
                         }
                         
                         DestructiveActionButton(
-                            title: deletionInProgress == device.udid ? "Удаление..." : "Удалить",
+                            title: deletionInProgress == device.udid ? "Deleting..." : "Delete",
                             systemImage: "trash",
                             isDisabled: deletionInProgress == device.udid
                         ) {
@@ -407,15 +407,15 @@ struct ContentView: View {
                     .padding(.top, 4)
                     
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Использование хранилища")
+                        Text("Storage usage")
                             .font(.headline)
                         ProgressView(value: Double(device.sizeBytes), total: Double(max(viewModel.totalSizeBytes, 1)))
                             .tint(.blue)
                         HStack {
-                            Text("\(device.sizeDescription) использовано")
+                            Text("\(device.sizeDescription) used")
                             Spacer()
                             let free = max(viewModel.totalSizeBytes - device.sizeBytes, 0)
-                            Text("\(formatBytes(free)) у других")
+                            Text("\(formatBytes(free)) used by other simulators")
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -425,11 +425,11 @@ struct ContentView: View {
                     
                     VStack(alignment: .leading, spacing: 10) {
                         if !device.apps.isEmpty {
-                            Text("Установленные приложения")
+                            Text("Installed apps")
                                 .font(.headline)
                         }
                         if device.apps.isEmpty {
-                            Text("Нет приложений внутри симулятора.")
+                            Text("No apps in this simulator.")
                                 .foregroundStyle(.secondary)
                                 .font(.callout)
                                 .padding(.top, 64)
@@ -461,9 +461,9 @@ struct ContentView: View {
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Выберите симулятор")
+                        Text("Select a simulator")
                             .font(.headline)
-                        Text("Кликните на устройство или сегмент хранилища снизу, чтобы увидеть детали.")
+                        Text("Click a device or storage segment below to see details.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -486,14 +486,14 @@ struct ContentView: View {
                 LegendItem(id: segment.id, name: segment.name, color: StorageBar.color(forIndex: index))
             }
             if emptyShareOfDisk > 0, let largestEmpty = emptySegments.max(by: { $0.sizeBytes < $1.sizeBytes }) {
-                items.append(LegendItem(id: largestEmpty.id, name: "Пустые", color: Color(nsColor: .systemGray)))
+                items.append(LegendItem(id: largestEmpty.id, name: "Empty", color: Color(nsColor: .systemGray)))
             }
             return items
         }()
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
-                Text("Хранилище симуляторов")
+                Text("Simulator storage")
                     .font(.headline)
                 Spacer()
                 Text(storageSummary)
@@ -598,7 +598,7 @@ struct ContentView: View {
         let sims = formatBytes(viewModel.totalSizeBytes)
         let count = viewModel.devices.count
         let diskPercent = percentDescription(value: viewModel.totalSizeBytes, of: viewModel.diskTotalBytes)
-        return "\(sims) в \(count) симуляторах (\(diskPercent) диска)"
+        return "\(sims) across \(count) simulators (\(diskPercent) of disk)"
     }
 
     private func passesFilter(_ device: SimulatorDevice) -> Bool {
@@ -730,7 +730,7 @@ private struct StorageBar: View {
                             share: emptyShareOfDisk,
                             minWidth: 8,
                             color: Color(nsColor: .systemGray),
-                            help: "Пустые симуляторы • \(formatBytes(emptySizeBytes)) • \((emptyShareOfSims * 100).formatted(.number.precision(.fractionLength(1))))%",
+                            help: "Empty simulators • \(formatBytes(emptySizeBytes)) • \((emptyShareOfSims * 100).formatted(.number.precision(.fractionLength(1))))%",
                             tapID: emptyTargetID
                         )
                     )

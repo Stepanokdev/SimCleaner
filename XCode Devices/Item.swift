@@ -44,7 +44,7 @@ struct SimulatorDevice: Identifiable, Hashable {
         ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
     }
     var lastUsedDescription: String {
-        guard let lastUsed else { return "Не запускался" }
+        guard let lastUsed else { return "Never launched" }
         return RelativeDateTimeFormatter.shared.localizedString(for: lastUsed, relativeTo: .now)
     }
 }
@@ -152,14 +152,14 @@ final class DeviceScanner: ObservableObject {
         let fm = FileManager.default
 
         guard fm.fileExists(atPath: url.path) else {
-            throw NSError(domain: "DeviceScanner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Каталог устройств не найден по пути \(url.path)."])
+            throw NSError(domain: "DeviceScanner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Devices directory not found at \(url.path)."])
         }
 
         let entries: [URL]
         do {
             entries = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
         } catch {
-            throw NSError(domain: "DeviceScanner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Не удалось прочитать каталог устройств по пути \(url.path): \(error.localizedDescription)"])
+            throw NSError(domain: "DeviceScanner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to read devices directory at \(url.path): \(error.localizedDescription)"])
         }
 
         let defaultSet = loadDefaultDeviceUDIDs(at: url)
@@ -186,19 +186,19 @@ final class DeviceScanner: ObservableObject {
         let plistURL = url.appending(path: "device.plist")
         let fm = FileManager.default
         guard let data = fm.contents(atPath: plistURL.path) else {
-            throw NSError(domain: "DeviceScanner", code: 2, userInfo: [NSLocalizedDescriptionKey: "Отсутствует device.plist в \(url.lastPathComponent)."])
+            throw NSError(domain: "DeviceScanner", code: 2, userInfo: [NSLocalizedDescriptionKey: "device.plist missing in \(url.lastPathComponent)."])
         }
 
         var format = PropertyListSerialization.PropertyListFormat.binary
         guard let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: &format) as? [String: Any] else {
-            throw NSError(domain: "DeviceScanner", code: 3, userInfo: [NSLocalizedDescriptionKey: "Не удалось распарсить device.plist в \(url.lastPathComponent)."])
+            throw NSError(domain: "DeviceScanner", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to parse device.plist in \(url.lastPathComponent)."])
         }
 
         guard let udid = plist["UDID"] as? String else {
-            throw NSError(domain: "DeviceScanner", code: 4, userInfo: [NSLocalizedDescriptionKey: "В device.plist отсутствует UDID в \(url.lastPathComponent)."])
+            throw NSError(domain: "DeviceScanner", code: 4, userInfo: [NSLocalizedDescriptionKey: "UDID missing in device.plist for \(url.lastPathComponent)."])
         }
 
-        let name = plist["name"] as? String ?? "Без имени"
+        let name = plist["name"] as? String ?? "Unnamed"
         let deviceTypeRaw = plist["deviceType"] as? String ?? ""
         let runtimeRaw = plist["runtime"] as? String ?? ""
         let lastBootedAtPlist = plist["lastBootedAt"] as? Date
@@ -270,11 +270,11 @@ final class DeviceScanner: ObservableObject {
 
         if process.terminationStatus != 0 {
             let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let message = String(data: data, encoding: .utf8) ?? "Неизвестная ошибка"
+            let message = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw NSError(
                 domain: "DeviceScanner",
                 code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "Не удалось удалить симулятор \(udid): \(message.trimmingCharacters(in: .whitespacesAndNewlines))"]
+                userInfo: [NSLocalizedDescriptionKey: "Failed to delete simulator \(udid): \(message.trimmingCharacters(in: .whitespacesAndNewlines))"]
             )
         }
     }
