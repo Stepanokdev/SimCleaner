@@ -277,6 +277,9 @@ struct ContentView: View {
     private var simulatorList: some View {
         VStack(spacing: 0) {
             listHeader
+            if viewModel.scanProgress != nil {
+                loadingProgressBar
+            }
             Divider()
 
             Group {
@@ -303,12 +306,8 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else if viewModel.isLoading && viewModel.devices.isEmpty {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Scanning simulators...")
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+//                    loadingPlaceholder
+                    EmptyView()
                 } else if filteredDevices.isEmpty {
                     VStack(spacing: 8) {
                         Label("No simulators found", systemImage: "archivebox")
@@ -398,6 +397,37 @@ struct ContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
+
+    @ViewBuilder
+    private var loadingProgressBar: some View {
+        if let progress = viewModel.scanProgress {
+            HStack(spacing: 12) {
+                ProgressView(value: Double(progress.completed), total: Double(max(progress.total, 1))) {
+                    Text("Scanning simulators...")
+                } currentValueLabel: {
+                    Text(progress.label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .progressViewStyle(.linear)
+//                .frame(maxWidth: 420)
+//                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
+
+//    @ViewBuilder
+//    private var loadingPlaceholder: some View {
+//        VStack(spacing: 12) {
+//            ProgressView()
+////            Text("Scanning simulators...")
+////                .foregroundStyle(.secondary)
+//        }
+//        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+//    }
 
     private var detailPanel: some View {
         ScrollView {

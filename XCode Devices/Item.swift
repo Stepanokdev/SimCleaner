@@ -49,6 +49,22 @@ struct SimulatorDevice: Identifiable, Hashable {
     }
 }
 
+struct ScanProgress: Equatable {
+    let completed: Int
+    let total: Int
+
+    var fraction: Double {
+        guard total > 0 else { return 0 }
+        return Double(completed) / Double(total)
+    }
+
+    var label: String {
+        guard total > 0 else { return "Scanning..." }
+        let percent = (fraction * 100).rounded()
+        return "\(completed)/\(total) • \(Int(percent))%"
+    }
+}
+
 enum DeviceCategory: String, CaseIterable, Identifiable {
     case iPhone
     case iPad
@@ -93,6 +109,7 @@ final class DeviceScanner: ObservableObject {
     @Published var errorMessage: String?
     @Published var devicesURL: URL
     @Published var hasFolderAccess: Bool = false
+    @Published var scanProgress: ScanProgress?
 
     private var activeSecurityScopedURL: URL?
 
@@ -124,26 +141,33 @@ final class DeviceScanner: ObservableObject {
         let scanURL = devicesURL
         isLoading = true
         errorMessage = nil
+        scanProgress = nil
 
-        Task.detached(priority: .userInitiated) { [scanURL] in
+        Task.detached(priority: .userInitiated) { [scanURL, weak self] in
             do {
-                let result = try DeviceScanner.loadDevices(at: scanURL)
+                let result = try DeviceScanner.loadDevices(at: scanURL) { progress in
+                    Task { @MainActor in
+                        self?.scanProgress = progress
+                    }
+                }
                 let disk = DeviceScanner.fetchDiskInfo(for: scanURL)
                 await MainActor.run {
-                    self.devices = result.devices
-                    self.totalSizeBytes = result.totalSizeBytes
-                    self.diskTotalBytes = disk.total
-                    self.diskAvailableBytes = disk.available
-                    self.isLoading = false
+                    self?.devices = result.devices
+                    self?.totalSizeBytes = result.totalSizeBytes
+                    self?.diskTotalBytes = disk.total
+                    self?.diskAvailableBytes = disk.available
+                    self?.isLoading = false
+                    self?.scanProgress = nil
                 }
             } catch {
                 await MainActor.run {
-                    self.devices = []
-                    self.totalSizeBytes = 0
-                    self.diskTotalBytes = 0
-                    self.diskAvailableBytes = 0
-                    self.errorMessage = error.localizedDescription
-                    self.isLoading = false
+                    self?.devices = []
+                    self?.totalSizeBytes = 0
+                    self?.diskTotalBytes = 0
+                    self?.diskAvailableBytes = 0
+                    self?.errorMessage = error.localizedDescription
+                    self?.isLoading = false
+                    self?.scanProgress = nil
                 }
             }
         }
@@ -157,6 +181,7 @@ final class DeviceScanner: ObservableObject {
         guard !devices.isEmpty else { return }
         errorMessage = nil
         isLoading = true
+        scanProgress = nil
         let udids = devices.map(\.udid)
         let scanURL = devicesURL
         print("Delete requested for \(udids.joined(separator: ",")) at path \(scanURL.path)")
@@ -208,7 +233,7 @@ final class DeviceScanner: ObservableObject {
         }
     }
 
-    nonisolated static func loadDevices(at url: URL) throws -> (devices: [SimulatorDevice], totalSizeBytes: Int64) {
+    nonisolated static func loadDevices(at url: URL, progress: ((ScanProgress) -> Void)? = nil) throws -> (devices: [SimulatorDevice], totalSizeBytes: Int64) {
         let fm = FileManager.default
 
         guard fm.fileExists(atPath: url.path) else {
@@ -222,21 +247,23 @@ final class DeviceScanner: ObservableObject {
             throw NSError(domain: "DeviceScanner", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to read devices directory at \(url.path): \(error.localizedDescription)"])
         }
 
+        let deviceFolders = entries.filter { $0.isDirectory }
+        progress?(ScanProgress(completed: 0, total: deviceFolders.count))
+
         let defaultSet = loadDefaultDeviceUDIDs(at: url)
 
         var devices: [SimulatorDevice] = []
         var totalSize: Int64 = 0
 
-        for entry in entries {
-            guard entry.isDirectory else { continue }
+        for (index, entry) in deviceFolders.enumerated() {
             do {
                 let device = try buildDevice(at: entry, defaultDeviceUDIDs: defaultSet)
                 devices.append(device)
                 totalSize += device.sizeBytes
             } catch {
                 // Skip unreadable devices but keep scanning the rest.
-                continue
             }
+            progress?(ScanProgress(completed: index + 1, total: deviceFolders.count))
         }
 
         return (devices, totalSize)
