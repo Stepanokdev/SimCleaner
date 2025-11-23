@@ -45,15 +45,23 @@ struct ContentView: View {
             }
             .background(.background)
         }
-//        .toolbar {
-//            ToolbarItemGroup(placement: .navigation) {
-//                Button {
-//                    toggleSidebar()
-//                } label: {
-//                    Label("Show/Hide filters", systemImage: "sidebar.leading")
-//                }
-//            }
-//        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.refresh()
+                } label: {
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .help("Refresh simulators")
+                .keyboardShortcut("r", modifiers: [.command])
+                .disabled(viewModel.isLoading)
+            }
+        }
 //        .background(Color(nsColor: .controlBackgroundColor))
         .onAppear {
             if viewModel.devices.isEmpty {
@@ -333,24 +341,9 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            HStack(spacing: 8) {
-                TextField("Search by name, OS, or UDID", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
-                Button {
-                    viewModel.refresh()
-                } label: {
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut("r", modifiers: [.command])
-                .disabled(viewModel.isLoading)
-            }
+            TextField("Search by name, OS, or UDID", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 260)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -486,7 +479,7 @@ struct ContentView: View {
                 LegendItem(id: segment.id, name: segment.name, color: StorageBar.color(forIndex: index))
             }
             if emptyShareOfDisk > 0, let largestEmpty = emptySegments.max(by: { $0.sizeBytes < $1.sizeBytes }) {
-                items.append(LegendItem(id: largestEmpty.id, name: "Empty", color: Color(nsColor: .systemGray)))
+                items.append(LegendItem(id: largestEmpty.id, name: "Empty simulators", color: Color(nsColor: .systemGray)))
             }
             return items
         }()
@@ -505,7 +498,10 @@ struct ContentView: View {
                 segments: storageSegments,
                 freeShare: freeDiskShare
             ) { id in
-                selectedDeviceID = id
+                withAnimation {
+                    selectedFilter = .all
+                    selectedDeviceID = id
+                }
             }
             .frame(height: 32)
             .padding(.trailing, 12)
