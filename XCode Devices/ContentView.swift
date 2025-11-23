@@ -198,13 +198,6 @@ struct ContentView: View {
                     ) { selectedFilter = .recentlyUsed }
                     
                     sidebarRow(
-                        title: "Never launched",
-                        subtitle: "\(count(for: .neverLaunched))",
-                        systemImage: "sparkles.rectangle.stack",
-                        isSelected: selectedFilter == .neverLaunched
-                    ) { selectedFilter = .neverLaunched }
-                    
-                    sidebarRow(
                         title: "With apps",
                         subtitle: "\(count(for: .withApps))",
                         systemImage: "square.stack.3d.up.fill",
@@ -752,8 +745,6 @@ struct ContentView: View {
         case .recentlyUsed:
             guard let last = device.lastUsed else { return false }
             return Date().timeIntervalSince(last) <= recentThreshold
-        case .neverLaunched:
-            return device.lastUsed == nil
         case .withApps:
             return device.appCount > 0
         case .empty:
@@ -773,8 +764,6 @@ struct ContentView: View {
             case .recentlyUsed:
                 guard let last = device.lastUsed else { return false }
                 return Date().timeIntervalSince(last) <= recentThreshold
-            case .neverLaunched:
-                return device.lastUsed == nil
             case .withApps:
                 return device.appCount > 0
             case .empty:
@@ -995,7 +984,6 @@ private enum SidebarSelection: Hashable {
     case category(DeviceCategory)
     case runtime(String)
     case recentlyUsed
-    case neverLaunched
     case withApps
     case empty
 }
