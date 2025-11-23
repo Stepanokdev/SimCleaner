@@ -21,6 +21,7 @@ struct ContentView: View {
     @State private var deletionInProgress: Set<String> = []
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @FocusState private var isSearchFocused: Bool
+    @State private var showPermissionSheet: Bool = false
 
     private let sizeColumnWidth: CGFloat = 90
     private let lastUsedColumnWidth: CGFloat = 150
@@ -38,7 +39,7 @@ struct ContentView: View {
 //                .background(Color(nsColor: .controlBackgroundColor))
         } detail: {
             detailPanel
-                .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 420)
+                .navigationSplitViewColumnWidth(min: 280, ideal: 280, max: 420)
         }
         .navigationSplitViewStyle(.balanced)
         .safeAreaInset(edge: .bottom) {
@@ -68,8 +69,16 @@ struct ContentView: View {
 //        .background(Color(nsColor: .controlBackgroundColor))
         .onAppear {
             isSearchFocused = false
+            if !viewModel.hasFolderAccess {
+                showPermissionSheet = true
+            }
             if viewModel.devices.isEmpty {
                 viewModel.refresh()
+            }
+        }
+        .onChange(of: viewModel.hasFolderAccess) { _, hasAccess in
+            if hasAccess {
+                showPermissionSheet = false
             }
         }
         .onChange(of: filteredDeviceIDs, initial: false) { _, ids in
@@ -122,15 +131,20 @@ struct ContentView: View {
             let totalSize = selection.reduce(0) { $0 + $1.sizeBytes }
             Text("\(selection.count) simulators • \(ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file))")
         }
+        .sheet(isPresented: $showPermissionSheet) {
+            permissionRequestSheet
+                .presentationDetents([.fraction(0.6)])
+                .interactiveDismissDisabled()
+        }
     }
 
     private var sidebar: some View {
         ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-                sidebarSection(title: "Devices") {
-                    sidebarRow(
-                        title: "All devices",
-                        subtitle: "\(viewModel.devices.count)",
+                VStack(alignment: .leading, spacing: 16) {
+                    sidebarSection(title: "Devices") {
+                        sidebarRow(
+                            title: "All devices",
+                            subtitle: "\(viewModel.devices.count)",
                         systemImage: "tray.full",
                         isSelected: selectedFilter == .all
                     ) { selectedFilter = .all }
@@ -266,13 +280,26 @@ struct ContentView: View {
             Divider()
 
             Group {
-                if let errorMessage = viewModel.errorMessage {
+                if !viewModel.hasFolderAccess {
+                    accessPlaceholder
+                } else if let errorMessage = viewModel.errorMessage {
                     VStack(spacing: 8) {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
-                        Text("Check the path and permissions.")
+                        Text("Sandboxed app needs read/write permission to the simulator folder.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
+                        VStack(spacing: 6) {
+                            Button("Allow access to Devices folder…") {
+                                viewModel.chooseDevicesDirectory()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            Text(viewModel.devicesURL.path)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else if viewModel.isLoading && viewModel.devices.isEmpty {
@@ -641,6 +668,66 @@ struct ContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
 //        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var accessPlaceholder: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "folder.badge.questionmark")
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("Access to the simulator Devices folder is required.")
+                .font(.headline)
+            Text("Select the CoreSimulator Devices folder to manage and clean your simulators.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+            Button("Allow access") {
+                showPermissionSheet = true
+            }
+            .buttonStyle(.borderedProminent)
+            Text(viewModel.devicesURL.path)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    private var permissionRequestSheet: some View {
+        VStack(spacing: 20) {
+            Image("iPhone-folder")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 120, height: 120)
+                .padding(.top, 8)
+            VStack(spacing: 6) {
+                Text("Allow access to simulator Devices folder")
+                    .font(.title3.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                Text("To manage your Xcode simulators, the app needs permission to read and delete items in the simulator Devices folder located in your Library.")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 420)
+            }
+            Spacer()
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    showPermissionSheet = false
+                }
+                .buttonStyle(.bordered)
+                Button("Select Folder") {
+                    showPermissionSheet = false
+                    viewModel.chooseDevicesDirectory()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(28)
+        .background(Color(.windowBackgroundColor))
     }
 
     private var filteredDevices: [SimulatorDevice] {

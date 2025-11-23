@@ -91,21 +91,40 @@ final class DeviceScanner: ObservableObject {
     @Published var diskAvailableBytes: Int64 = 0
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    @Published var devicesURL: URL
+    @Published var hasFolderAccess: Bool = false
 
-    let devicesURL: URL
+    private var activeSecurityScopedURL: URL?
 
-    init(devicesURL: URL = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Developer/CoreSimulator/Devices")) {
-        self.devicesURL = devicesURL
+    private static let devicesBookmarkKey = "SimulatorDevicesDirectoryBookmark"
+    private static var defaultDevicesURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Developer/CoreSimulator/Devices")
+    }
+
+    init(devicesURL: URL? = nil) {
+        if let bookmarked = DeviceScanner.restoreBookmarkedURL() {
+            self.devicesURL = bookmarked
+            if beginAccessing(url: bookmarked, securityScoped: true) {
+                print("DeviceScanner init: restored bookmarked URL \(bookmarked.path)")
+            } else {
+                print("DeviceScanner init: failed to access bookmarked URL \(bookmarked.path)")
+            }
+        } else {
+            let resolved = devicesURL ?? DeviceScanner.defaultDevicesURL
+            self.devicesURL = resolved
+            print("DeviceScanner init: using default URL \(resolved.path)")
+        }
     }
 
     func refresh() {
+        let scanURL = devicesURL
         isLoading = true
         errorMessage = nil
 
-        Task.detached(priority: .userInitiated) { [devicesURL] in
+        Task.detached(priority: .userInitiated) { [scanURL] in
             do {
-                let result = try DeviceScanner.loadDevices(at: devicesURL)
-                let disk = DeviceScanner.fetchDiskInfo(for: devicesURL)
+                let result = try DeviceScanner.loadDevices(at: scanURL)
+                let disk = DeviceScanner.fetchDiskInfo(for: scanURL)
                 await MainActor.run {
                     self.devices = result.devices
                     self.totalSizeBytes = result.totalSizeBytes
@@ -135,22 +154,53 @@ final class DeviceScanner: ObservableObject {
         errorMessage = nil
         isLoading = true
         let udids = devices.map(\.udid)
+        let scanURL = devicesURL
+        print("Delete requested for \(udids.joined(separator: ",")) at path \(scanURL.path)")
 
         do {
-            let result = try await Task.detached(priority: .userInitiated) { [devicesURL, udids] in
-                try DeviceScanner.performDelete(udids: udids)
-                return try DeviceScanner.loadDevices(at: devicesURL)
+            let result = try await Task.detached(priority: .userInitiated) { [scanURL, udids] in
+                try DeviceScanner.performDelete(udids: udids, devicesRoot: scanURL)
+                return try DeviceScanner.loadDevices(at: scanURL)
             }.value
 
             self.devices = result.devices
             self.totalSizeBytes = result.totalSizeBytes
-            let disk = DeviceScanner.fetchDiskInfo(for: devicesURL)
+            let disk = DeviceScanner.fetchDiskInfo(for: scanURL)
             self.diskTotalBytes = disk.total
             self.diskAvailableBytes = disk.available
             self.isLoading = false
         } catch {
             self.errorMessage = error.localizedDescription
             self.isLoading = false
+        }
+    }
+
+    func chooseDevicesDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Allow access to the simulator devices folder"
+        panel.message = "The app needs permission to read the Xcode simulator data."
+        panel.directoryURL = devicesURL
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use This Folder"
+
+        let response = panel.runModal()
+        guard response == .OK, let url = panel.url else {
+            hasFolderAccess = false
+            print("User cancelled folder selection")
+            return
+        }
+
+        let granted = beginAccessing(url: url, securityScoped: true)
+        hasFolderAccess = granted
+        if granted {
+            DeviceScanner.saveBookmark(for: url)
+            print("User selected devices folder: \(url.path)")
+            devicesURL = url
+            refresh()
+        } else {
+            print("Failed to start security scoped access for \(url.path)")
         }
     }
 
@@ -262,31 +312,73 @@ final class DeviceScanner: ObservableObject {
         return udids
     }
 
-    private nonisolated static func performDelete(udid: String) throws {
-        try performDelete(udids: [udid])
+    private nonisolated static func performDelete(udid: String, devicesRoot: URL) throws {
+        try performDelete(udids: [udid], devicesRoot: devicesRoot)
     }
 
-    private nonisolated static func performDelete(udids: [String]) throws {
+    private nonisolated static func performDelete(udids: [String], devicesRoot: URL) throws {
         guard !udids.isEmpty else { return }
+        print("performDelete launching xcrun simctl delete for: \(udids)")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["simctl", "delete"] + udids
 
         let errorPipe = Pipe()
+        let outputPipe = Pipe()
         process.standardError = errorPipe
-        process.standardOutput = Pipe()
+        process.standardOutput = outputPipe
 
         try process.run()
         process.waitUntilExit()
 
+        let stdoutData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        print("simctl delete stdout: \(stdout.trimmingCharacters(in: .whitespacesAndNewlines))")
+        print("simctl delete stderr: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+        print("simctl delete exit code: \(process.terminationStatus)")
+
         if process.terminationStatus != 0 {
-            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            let sandboxBlocked = stderr.lowercased().contains("sandbox")
+            if sandboxBlocked {
+                print("simctl blocked by sandbox, attempting manual removal of device folders")
+                try deleteDeviceFolders(udids: udids, devicesRoot: devicesRoot)
+                return
+            }
+            let message = stderr.isEmpty ? "Unknown error" : stderr
             let ids = udids.joined(separator: ", ")
             throw NSError(
                 domain: "DeviceScanner",
                 code: 5,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to delete simulator(s) \(ids): \(message.trimmingCharacters(in: .whitespacesAndNewlines))"]
+            )
+        }
+    }
+
+    private nonisolated static func deleteDeviceFolders(udids: [String], devicesRoot: URL) throws {
+        let fm = FileManager.default
+        var errors: [String] = []
+        for udid in udids {
+            let url = devicesRoot.appending(path: udid)
+            guard fm.fileExists(atPath: url.path) else {
+                print("Device folder not found for \(udid) at \(url.path)")
+                continue
+            }
+            do {
+                try fm.removeItem(at: url)
+                print("Removed device folder at \(url.path)")
+            } catch {
+                let message = error.localizedDescription
+                errors.append("\(udid): \(message)")
+                print("Failed to remove device folder for \(udid): \(message)")
+            }
+        }
+        if !errors.isEmpty {
+            throw NSError(
+                domain: "DeviceScanner",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "Manual delete errors: \(errors.joined(separator: "; "))"]
             )
         }
     }
@@ -417,6 +509,57 @@ final class DeviceScanner: ObservableObject {
         let total = (values[.systemSize] as? NSNumber)?.int64Value ?? 0
         let free = (values[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
         return (total, free)
+    }
+
+    @discardableResult
+    private func beginAccessing(url: URL, securityScoped: Bool) -> Bool {
+        activeSecurityScopedURL?.stopAccessingSecurityScopedResource()
+        activeSecurityScopedURL = nil
+        guard securityScoped else {
+            hasFolderAccess = true
+            return true
+        }
+        if url.startAccessingSecurityScopedResource() {
+            activeSecurityScopedURL = url
+            hasFolderAccess = true
+            print("Started security scoped access for \(url.path)")
+            return true
+        } else {
+            print("Failed to start security scoped access for \(url.path)")
+            hasFolderAccess = false
+            return false
+        }
+    }
+
+    private nonisolated static func restoreBookmarkedURL() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: devicesBookmarkKey) else { return nil }
+        var isStale = false
+        do {
+            let url = try URL(
+                resolvingBookmarkData: data,
+                options: [.withSecurityScope, .withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            if isStale {
+                UserDefaults.standard.removeObject(forKey: devicesBookmarkKey)
+                return nil
+            }
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    private nonisolated static func saveBookmark(for url: URL) {
+        guard let data = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: devicesBookmarkKey)
+    }
+
+    private nonisolated static func clearBookmark() {
+        UserDefaults.standard.removeObject(forKey: devicesBookmarkKey)
     }
 }
 
