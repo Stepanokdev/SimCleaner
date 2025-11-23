@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var showDeleteConfirmation: Bool = false
     @State private var deletionInProgress: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @FocusState private var isSearchFocused: Bool
 
     private let sizeColumnWidth: CGFloat = 90
     private let lastUsedColumnWidth: CGFloat = 150
@@ -64,6 +65,7 @@ struct ContentView: View {
         }
 //        .background(Color(nsColor: .controlBackgroundColor))
         .onAppear {
+            isSearchFocused = false
             if viewModel.devices.isEmpty {
                 viewModel.refresh()
             }
@@ -344,6 +346,7 @@ struct ContentView: View {
             TextField("Search by name, OS, or UDID", text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 260)
+                .focused($isSearchFocused)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
