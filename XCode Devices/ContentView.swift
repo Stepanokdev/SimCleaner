@@ -13,10 +13,12 @@ struct ContentView: View {
     @State private var sortOrder: [KeyPathComparator<SimulatorDevice>] = [KeyPathComparator(\.sizeBytes, order: .reverse)]
     @State private var searchText: String = ""
     @State private var selectedFilter: SidebarSelection = .all
-    @State private var selectedDeviceID: String?
+    @State private var selectedDeviceIDs: Set<String> = []
     @State private var devicePendingDeletion: SimulatorDevice?
+    @State private var selectionPendingDeletion: [SimulatorDevice]?
     @State private var showDeleteConfirmation: Bool = false
-    @State private var deletionInProgress: String?
+    @State private var showBulkDeleteConfirmation: Bool = false
+    @State private var deletionInProgress: Set<String> = []
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @FocusState private var isSearchFocused: Bool
 
@@ -71,10 +73,14 @@ struct ContentView: View {
             }
         }
         .onChange(of: filteredDeviceIDs, initial: false) { _, ids in
-            if let current = selectedDeviceID, ids.contains(current) {
-                return
+            let validSelection = selectedDeviceIDs.intersection(ids)
+            if !validSelection.isEmpty {
+                selectedDeviceIDs = validSelection
+            } else if let first = ids.first {
+                selectedDeviceIDs = [first]
+            } else {
+                selectedDeviceIDs = []
             }
-            selectedDeviceID = ids.first
         }
         .alert(
             "Delete simulator?",
@@ -82,10 +88,10 @@ struct ContentView: View {
             presenting: devicePendingDeletion
         ) { device in
             Button("Delete", role: .destructive) {
-                deletionInProgress = device.udid
+                deletionInProgress.insert(device.udid)
                 Task {
-                    await viewModel.delete(device: device)
-                    deletionInProgress = nil
+                    await viewModel.delete(devices: [device])
+                    deletionInProgress.remove(device.udid)
                     devicePendingDeletion = nil
                 }
             }
@@ -94,6 +100,27 @@ struct ContentView: View {
             }
         } message: { device in
             Text("\(device.name)\n\(device.runtime)\nUDID: \(device.udid)")
+        }
+        .alert(
+            "Delete selected simulators?",
+            isPresented: $showBulkDeleteConfirmation,
+            presenting: selectionPendingDeletion
+        ) { selection in
+            Button("Delete", role: .destructive) {
+                let ids = Set(selection.map(\.udid))
+                deletionInProgress.formUnion(ids)
+                Task {
+                    await viewModel.delete(devices: selection)
+                    deletionInProgress.subtract(ids)
+                    selectionPendingDeletion = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                selectionPendingDeletion = nil
+            }
+        } message: { selection in
+            let totalSize = selection.reduce(0) { $0 + $1.sizeBytes }
+            Text("\(selection.count) simulators • \(ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file))")
         }
     }
 
@@ -355,7 +382,9 @@ struct ContentView: View {
     private var detailPanel: some View {
         ScrollView {
             VStack(alignment: .center, spacing: 16) {
-                if let device = selectedDevice {
+                if selectedDevices.count > 1 {
+                    multiSelectionPanel
+                } else if let device = primarySelectedDevice {
                     ZStack {
                         
                         LinearGradient(
@@ -392,9 +421,9 @@ struct ContentView: View {
                         }
                         
                         DestructiveActionButton(
-                            title: deletionInProgress == device.udid ? "Deleting..." : "Delete",
+                            title: deletionInProgress.contains(device.udid) ? "Deleting..." : "Delete",
                             systemImage: "trash",
-                            isDisabled: deletionInProgress == device.udid
+                            isDisabled: deletionInProgress.contains(device.udid) || viewModel.isLoading
                         ) {
                             devicePendingDeletion = device
                             showDeleteConfirmation = true
@@ -409,6 +438,7 @@ struct ContentView: View {
                             .tint(.blue)
                         HStack {
                             Text("\(device.sizeDescription) used")
+                                .fontWeight(.bold)
                             Spacer()
                             let free = max(viewModel.totalSizeBytes - device.sizeBytes, 0)
                             Text("\(formatBytes(free)) used by other simulators")
@@ -472,6 +502,108 @@ struct ContentView: View {
         }
     }
 
+    private var multiSelectionPanel: some View {
+        let selection = selectedDevices
+        let namesPreview = Array(selection.prefix(6))
+        let remainingCount = max(selection.count - namesPreview.count, 0)
+
+        return VStack(spacing: 14) {
+            VStack(spacing: 6) {
+                Text("Selected simulators")
+                    .font(.title3.weight(.semibold))
+                Text("\(selection.count) selected • \(selectedDevicesSizeDescription) total")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+//                HStack {
+//                    Label("\(selection.count) items", systemImage: "rectangle.3.group")
+//                        .font(.subheadline)
+//                    Spacer()
+//                    Label(selectedDevicesSizeDescription, systemImage: "internaldrive")
+//                        .font(.subheadline)
+//                }
+//                .foregroundStyle(.secondary)
+
+                if !namesPreview.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Included")
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(namesPreview) { device in
+                            HStack(spacing: 10) {
+                                DeviceIconView(device: device, size: 18, weight: .regular)
+                                    .frame(width: 22, height: 22)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(device.name)
+                                        .font(.callout)
+                                        .lineLimit(1)
+                                    Text(device.runtime)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Text(device.sizeDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        if remainingCount > 0 {
+                            Text("+ \(remainingCount) more")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.gray.opacity(0.06))
+                    )
+                }
+
+                if viewModel.totalSizeBytes > 0 {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Storage usage")
+                            .font(.subheadline.weight(.semibold))
+                        ProgressView(
+                            value: Double(selectedDevicesTotalSize),
+                            total: Double(max(viewModel.totalSizeBytes, 1))
+                        )
+                        .tint(.blue)
+
+                        HStack {
+                            Text("\(selectedDevicesSizeDescription) selected")
+                            Spacer()
+                            let remaining = max(viewModel.totalSizeBytes - selectedDevicesTotalSize, 0)
+                            Text("\(formatBytes(remaining)) used by other simulators")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if viewModel.diskTotalBytes > 0 {
+                            Text("\(percentDescription(value: selectedDevicesTotalSize, of: viewModel.diskTotalBytes)) of disk space")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            DestructiveActionButton(
+                title: deletionInProgress.isEmpty ? "Delete selected simulators" : "Deleting...",
+                systemImage: "trash",
+                isDisabled: selection.isEmpty || !deletionInProgress.isEmpty || viewModel.isLoading
+            ) {
+                selectionPendingDeletion = selection
+                showBulkDeleteConfirmation = true
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var storagePanel: some View {
         let nonEmptySegments = storageSegments.filter { !$0.isEmpty }
         let emptySegments = storageSegments.filter { $0.isEmpty }
@@ -503,7 +635,7 @@ struct ContentView: View {
             ) { id in
                 withAnimation {
                     selectedFilter = .all
-                    selectedDeviceID = id
+                    selectedDeviceIDs = [id]
                 }
             }
             .frame(height: 32)
@@ -538,23 +670,32 @@ struct ContentView: View {
         sortedDevices.map(\.id)
     }
 
-    private var selectedDevice: SimulatorDevice? {
-        if let id = selectedDeviceID {
-            return sortedDevices.first(where: { $0.id == id })
+    private var selectedDevices: [SimulatorDevice] {
+        guard !selectedDeviceIDs.isEmpty else { return [] }
+        let selectionSet = selectedDeviceIDs
+        return sortedDevices.filter { selectionSet.contains($0.id) }
+    }
+
+    private var primarySelectedDevice: SimulatorDevice? {
+        if selectedDevices.count == 1 {
+            return selectedDevices.first
         }
-        return sortedDevices.first
+        return nil
+    }
+
+    private var selectedDevicesTotalSize: Int64 {
+        selectedDevices.reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    private var selectedDevicesSizeDescription: String {
+        ByteCountFormatter.string(fromByteCount: selectedDevicesTotalSize, countStyle: .file)
     }
 
     private var tableSelection: Binding<Set<String>> {
         Binding(
-            get: {
-                if let id = selectedDeviceID {
-                    return [id]
-                }
-                return []
-            },
+            get: { selectedDeviceIDs.intersection(filteredDeviceIDs) },
             set: { newValue in
-                selectedDeviceID = newValue.first
+                selectedDeviceIDs = newValue.intersection(filteredDeviceIDs)
             }
         )
     }

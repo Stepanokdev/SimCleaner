@@ -127,12 +127,18 @@ final class DeviceScanner: ObservableObject {
     }
 
     func delete(device: SimulatorDevice) async {
+        await delete(devices: [device])
+    }
+
+    func delete(devices: [SimulatorDevice]) async {
+        guard !devices.isEmpty else { return }
         errorMessage = nil
         isLoading = true
+        let udids = devices.map(\.udid)
 
         do {
-            let result = try await Task.detached(priority: .userInitiated) { [devicesURL] in
-                try DeviceScanner.performDelete(udid: device.udid)
+            let result = try await Task.detached(priority: .userInitiated) { [devicesURL, udids] in
+                try DeviceScanner.performDelete(udids: udids)
                 return try DeviceScanner.loadDevices(at: devicesURL)
             }.value
 
@@ -257,9 +263,14 @@ final class DeviceScanner: ObservableObject {
     }
 
     private nonisolated static func performDelete(udid: String) throws {
+        try performDelete(udids: [udid])
+    }
+
+    private nonisolated static func performDelete(udids: [String]) throws {
+        guard !udids.isEmpty else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = ["simctl", "delete", udid]
+        process.arguments = ["simctl", "delete"] + udids
 
         let errorPipe = Pipe()
         process.standardError = errorPipe
@@ -271,10 +282,11 @@ final class DeviceScanner: ObservableObject {
         if process.terminationStatus != 0 {
             let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
             let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            let ids = udids.joined(separator: ", ")
             throw NSError(
                 domain: "DeviceScanner",
                 code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to delete simulator \(udid): \(message.trimmingCharacters(in: .whitespacesAndNewlines))"]
+                userInfo: [NSLocalizedDescriptionKey: "Failed to delete simulator(s) \(ids): \(message.trimmingCharacters(in: .whitespacesAndNewlines))"]
             )
         }
     }
