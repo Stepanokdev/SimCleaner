@@ -10,6 +10,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var viewModel = DeviceScanner()
+    @StateObject private var ratingManager = RatingManager()
     @State private var sortOrder: [KeyPathComparator<SimulatorDevice>] = [KeyPathComparator(\.sizeBytes, order: .reverse)]
     @State private var searchText: String = ""
     @State private var selectedFilter: SidebarSelection = .all
@@ -115,6 +116,9 @@ struct ContentView: View {
                     await viewModel.delete(devices: [device])
                     deletionInProgress.remove(device.udid)
                     devicePendingDeletion = nil
+                    if viewModel.errorMessage == nil {
+                        ratingManager.recordSuccessfulDeletion()
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {
@@ -135,6 +139,9 @@ struct ContentView: View {
                     await viewModel.delete(devices: selection)
                     deletionInProgress.subtract(ids)
                     selectionPendingDeletion = nil
+                    if viewModel.errorMessage == nil {
+                        ratingManager.recordSuccessfulDeletion()
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {
