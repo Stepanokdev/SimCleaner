@@ -12,9 +12,15 @@ import Foundation
 struct SimulatorApp: Identifiable, Hashable {
     let id = UUID()
     let name: String
-    let path: URL
+    let bundleId: String
+    let bundlePath: URL
+    let dataContainerPath: URL?
     let icon: URL?
-    let sizeBytes: Int64
+    let bundleSizeBytes: Int64
+    let dataSizeBytes: Int64
+
+    var path: URL { bundlePath }
+    var sizeBytes: Int64 { bundleSizeBytes + dataSizeBytes }
 
     var sizeDescription: String {
         ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
@@ -381,23 +387,46 @@ final class DeviceScanner: ObservableObject {
     }
 
     private nonisolated static func fetchInstalledApps(at url: URL) -> ([SimulatorApp], Date?) {
-        let appRoot = url.appending(path: "data/Containers/Bundle/Application")
+        let bundleRoot = url.appending(path: "data/Containers/Bundle/Application")
+        let dataRoot = url.appending(path: "data/Containers/Data/Application")
         let fm = FileManager.default
-        guard let containers = try? fm.contentsOfDirectory(at: appRoot, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else {
+
+        guard let bundleContainers = try? fm.contentsOfDirectory(at: bundleRoot, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else {
             return ([], nil)
         }
+
+        // Build a mapping: bundleId -> Data container URL
+        let dataContainerMap = buildDataContainerMap(at: dataRoot)
 
         var apps: [SimulatorApp] = []
         var newestDate: Date?
 
-        for container in containers where container.isDirectory {
+        for container in bundleContainers where container.isDirectory {
+            // Read bundleId from metadata plist
+            let bundleId = readBundleId(from: container)
+
             guard let bundles = try? fm.contentsOfDirectory(at: container, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else { continue }
 
             for bundle in bundles where bundle.pathExtension == "app" {
                 let name = bundle.deletingPathExtension().lastPathComponent
                 let icon = findAppIcon(in: bundle)
-                let size = directorySize(at: bundle)
-                apps.append(SimulatorApp(name: name, path: bundle, icon: icon, sizeBytes: size))
+
+                // Calculate Bundle size (the .app folder)
+                let bundleSize = directorySize(at: bundle)
+
+                // Find and calculate Data container size
+                let dataContainerURL = bundleId.flatMap { dataContainerMap[$0] }
+                let dataSize = dataContainerURL.map { directorySize(at: $0) } ?? 0
+
+                apps.append(SimulatorApp(
+                    name: name,
+                    bundleId: bundleId ?? "unknown",
+                    bundlePath: bundle,
+                    dataContainerPath: dataContainerURL,
+                    icon: icon,
+                    bundleSizeBytes: bundleSize,
+                    dataSizeBytes: dataSize
+                ))
 
                 if let mod = bundle.contentModificationDate, let currentNewest = newestDate {
                     if mod > currentNewest { newestDate = mod }
@@ -408,6 +437,35 @@ final class DeviceScanner: ObservableObject {
         }
 
         return (apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }, newestDate)
+    }
+
+    /// Builds a mapping from bundleId to Data container URL
+    private nonisolated static func buildDataContainerMap(at dataRoot: URL) -> [String: URL] {
+        let fm = FileManager.default
+        guard let containers = try? fm.contentsOfDirectory(at: dataRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else {
+            return [:]
+        }
+
+        var map: [String: URL] = [:]
+        for container in containers where container.isDirectory {
+            if let bundleId = readBundleId(from: container) {
+                map[bundleId] = container
+            }
+        }
+        return map
+    }
+
+    /// Reads MCMMetadataIdentifier (bundleId) from container's metadata plist
+    private nonisolated static func readBundleId(from containerURL: URL) -> String? {
+        let metadataURL = containerURL.appending(path: ".com.apple.mobile_container_manager.metadata.plist")
+        guard let data = try? Data(contentsOf: metadataURL) else { return nil }
+
+        var format = PropertyListSerialization.PropertyListFormat.binary
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: &format) as? [String: Any] else {
+            return nil
+        }
+
+        return plist["MCMMetadataIdentifier"] as? String
     }
 
     private nonisolated static func friendlyRuntime(_ runtime: String) -> String {

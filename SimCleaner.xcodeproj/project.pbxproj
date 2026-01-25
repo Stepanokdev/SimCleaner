@@ -24,10 +24,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		CE4DACB82ED1DE290042A643 /* XCode Devices.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "XCode Devices.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		CE4DACC72ED1DE2B0042A643 /* XCode DevicesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "XCode DevicesTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		CE4DACD12ED1DE2B0042A643 /* XCode DevicesUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "XCode DevicesUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		CE4DAE002ED1E2E70042A700 /* XCode Devices.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "XCode Devices/XCode Devices.entitlements"; sourceTree = "<group>"; };
+		CE4DACB82ED1DE290042A643 /* SimCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SimCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE4DACC72ED1DE2B0042A643 /* SimCleanerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimCleanerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE4DACD12ED1DE2B0042A643 /* SimCleanerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimCleanerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CE4DAE002ED1E2E70042A700 /* XCode Devices/XCode Devices.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "XCode Devices/XCode Devices.entitlements"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -79,7 +79,7 @@
 				CE4DACBA2ED1DE290042A643 /* XCode Devices */,
 				CE4DACCA2ED1DE2B0042A643 /* XCode DevicesTests */,
 				CE4DACD42ED1DE2B0042A643 /* XCode DevicesUITests */,
-				CE4DAE002ED1E2E70042A700 /* XCode Devices.entitlements */,
+				CE4DAE002ED1E2E70042A700 /* XCode Devices/XCode Devices.entitlements */,
 				CE4DACB92ED1DE290042A643 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -87,9 +87,9 @@
 		CE4DACB92ED1DE290042A643 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				CE4DACB82ED1DE290042A643 /* XCode Devices.app */,
-				CE4DACC72ED1DE2B0042A643 /* XCode DevicesTests.xctest */,
-				CE4DACD12ED1DE2B0042A643 /* XCode DevicesUITests.xctest */,
+				CE4DACB82ED1DE290042A643 /* SimCleaner.app */,
+				CE4DACC72ED1DE2B0042A643 /* SimCleanerTests.xctest */,
+				CE4DACD12ED1DE2B0042A643 /* SimCleanerUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -97,9 +97,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		CE4DACB72ED1DE290042A643 /* XCode Devices */ = {
+		CE4DACB72ED1DE290042A643 /* SimCleaner */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = CE4DACDB2ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "XCode Devices" */;
+			buildConfigurationList = CE4DACDB2ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "SimCleaner" */;
 			buildPhases = (
 				CE4DACB42ED1DE290042A643 /* Sources */,
 				CE4DACB52ED1DE290042A643 /* Frameworks */,
@@ -112,16 +112,16 @@
 			fileSystemSynchronizedGroups = (
 				CE4DACBA2ED1DE290042A643 /* XCode Devices */,
 			);
-			name = "XCode Devices";
+			name = SimCleaner;
 			packageProductDependencies = (
 			);
 			productName = "XCode Devices";
-			productReference = CE4DACB82ED1DE290042A643 /* XCode Devices.app */;
+			productReference = CE4DACB82ED1DE290042A643 /* SimCleaner.app */;
 			productType = "com.apple.product-type.application";
 		};
-		CE4DACC62ED1DE2B0042A643 /* XCode DevicesTests */ = {
+		CE4DACC62ED1DE2B0042A643 /* SimCleanerTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = CE4DACDE2ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "XCode DevicesTests" */;
+			buildConfigurationList = CE4DACDE2ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "SimCleanerTests" */;
 			buildPhases = (
 				CE4DACC32ED1DE2B0042A643 /* Sources */,
 				CE4DACC42ED1DE2B0042A643 /* Frameworks */,
@@ -135,16 +135,16 @@
 			fileSystemSynchronizedGroups = (
 				CE4DACCA2ED1DE2B0042A643 /* XCode DevicesTests */,
 			);
-			name = "XCode DevicesTests";
+			name = SimCleanerTests;
 			packageProductDependencies = (
 			);
 			productName = "XCode DevicesTests";
-			productReference = CE4DACC72ED1DE2B0042A643 /* XCode DevicesTests.xctest */;
+			productReference = CE4DACC72ED1DE2B0042A643 /* SimCleanerTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		CE4DACD02ED1DE2B0042A643 /* XCode DevicesUITests */ = {
+		CE4DACD02ED1DE2B0042A643 /* SimCleanerUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = CE4DACE12ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "XCode DevicesUITests" */;
+			buildConfigurationList = CE4DACE12ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "SimCleanerUITests" */;
 			buildPhases = (
 				CE4DACCD2ED1DE2B0042A643 /* Sources */,
 				CE4DACCE2ED1DE2B0042A643 /* Frameworks */,
@@ -158,11 +158,11 @@
 			fileSystemSynchronizedGroups = (
 				CE4DACD42ED1DE2B0042A643 /* XCode DevicesUITests */,
 			);
-			name = "XCode DevicesUITests";
+			name = SimCleanerUITests;
 			packageProductDependencies = (
 			);
 			productName = "XCode DevicesUITests";
-			productReference = CE4DACD12ED1DE2B0042A643 /* XCode DevicesUITests.xctest */;
+			productReference = CE4DACD12ED1DE2B0042A643 /* SimCleanerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -188,7 +188,7 @@
 					};
 				};
 			};
-			buildConfigurationList = CE4DACB32ED1DE290042A643 /* Build configuration list for PBXProject "XCode Devices" */;
+			buildConfigurationList = CE4DACB32ED1DE290042A643 /* Build configuration list for PBXProject "SimCleaner" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -202,9 +202,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				CE4DACB72ED1DE290042A643 /* XCode Devices */,
-				CE4DACC62ED1DE2B0042A643 /* XCode DevicesTests */,
-				CE4DACD02ED1DE2B0042A643 /* XCode DevicesUITests */,
+				CE4DACB72ED1DE290042A643 /* SimCleaner */,
+				CE4DACC62ED1DE2B0042A643 /* SimCleanerTests */,
+				CE4DACD02ED1DE2B0042A643 /* SimCleanerUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -260,12 +260,12 @@
 /* Begin PBXTargetDependency section */
 		CE4DACC92ED1DE2B0042A643 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = CE4DACB72ED1DE290042A643 /* XCode Devices */;
+			target = CE4DACB72ED1DE290042A643 /* SimCleaner */;
 			targetProxy = CE4DACC82ED1DE2B0042A643 /* PBXContainerItemProxy */;
 		};
 		CE4DACD32ED1DE2B0042A643 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = CE4DACB72ED1DE290042A643 /* XCode Devices */;
+			target = CE4DACB72ED1DE290042A643 /* SimCleaner */;
 			targetProxy = CE4DACD22ED1DE2B0042A643 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -329,6 +329,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = SimCleaner;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -386,6 +387,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = SimCleaner;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
@@ -416,8 +418,8 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "SimCleaner";
-				INFOPLIST_KEY_CFBundleName = "SimCleaner";
+				INFOPLIST_KEY_CFBundleDisplayName = SimCleaner;
+				INFOPLIST_KEY_CFBundleName = SimCleaner;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -463,8 +465,8 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "SimCleaner";
-				INFOPLIST_KEY_CFBundleName = "SimCleaner";
+				INFOPLIST_KEY_CFBundleDisplayName = SimCleaner;
+				INFOPLIST_KEY_CFBundleName = SimCleaner;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -502,7 +504,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XCode Devices.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/XCode Devices";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SimCleaner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SimCleaner";
 			};
 			name = Debug;
 		};
@@ -523,7 +525,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/XCode Devices.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/XCode Devices";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SimCleaner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SimCleaner";
 			};
 			name = Release;
 		};
@@ -568,7 +570,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		CE4DACB32ED1DE290042A643 /* Build configuration list for PBXProject "XCode Devices" */ = {
+		CE4DACB32ED1DE290042A643 /* Build configuration list for PBXProject "SimCleaner" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CE4DACD92ED1DE2B0042A643 /* Debug */,
@@ -577,7 +579,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		CE4DACDB2ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "XCode Devices" */ = {
+		CE4DACDB2ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "SimCleaner" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CE4DACDC2ED1DE2B0042A643 /* Debug */,
@@ -586,7 +588,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		CE4DACDE2ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "XCode DevicesTests" */ = {
+		CE4DACDE2ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "SimCleanerTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CE4DACDF2ED1DE2B0042A643 /* Debug */,
@@ -595,7 +597,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		CE4DACE12ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "XCode DevicesUITests" */ = {
+		CE4DACE12ED1DE2B0042A643 /* Build configuration list for PBXNativeTarget "SimCleanerUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CE4DACE22ED1DE2B0042A643 /* Debug */,
