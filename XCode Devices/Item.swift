@@ -71,6 +71,27 @@ struct ScanProgress: Equatable {
     }
 }
 
+struct DeletionProgress: Equatable {
+    let completed: Int
+    let total: Int
+    let currentDeviceName: String
+    let totalSizeBytes: Int64
+
+    var fraction: Double {
+        guard total > 0 else { return 0 }
+        return Double(completed) / Double(total)
+    }
+
+    var label: String {
+        guard total > 0 else { return "Deleting..." }
+        return "\(completed) of \(total)"
+    }
+
+    var sizeDescription: String {
+        ByteCountFormatter.string(fromByteCount: totalSizeBytes, countStyle: .file)
+    }
+}
+
 enum DeviceCategory: String, CaseIterable, Identifiable {
     case iPhone
     case iPad
@@ -116,6 +137,7 @@ final class DeviceScanner: ObservableObject {
     @Published var devicesURL: URL
     @Published var hasFolderAccess: Bool = false
     @Published var scanProgress: ScanProgress?
+    @Published var deletionProgress: DeletionProgress?
 
     private var activeSecurityScopedURL: URL?
 
@@ -188,13 +210,31 @@ final class DeviceScanner: ObservableObject {
         errorMessage = nil
         isLoading = true
         scanProgress = nil
-        let udids = devices.map(\.udid)
+
+        let totalSize = devices.reduce(0) { $0 + $1.sizeBytes }
+        deletionProgress = DeletionProgress(
+            completed: 0,
+            total: devices.count,
+            currentDeviceName: devices.first?.name ?? "",
+            totalSizeBytes: totalSize
+        )
+
+        let devicesToDelete = devices
         let scanURL = devicesURL
-        print("Delete requested for \(udids.joined(separator: ",")) at path \(scanURL.path)")
+        print("Delete requested for \(devicesToDelete.map(\.udid).joined(separator: ",")) at path \(scanURL.path)")
 
         do {
-            let result = try await Task.detached(priority: .userInitiated) { [scanURL, udids] in
-                try DeviceScanner.performDelete(udids: udids, devicesRoot: scanURL)
+            let result = try await Task.detached(priority: .userInitiated) { [scanURL, devicesToDelete, weak self] in
+                try DeviceScanner.performDelete(devices: devicesToDelete, devicesRoot: scanURL) { completed, currentName in
+                    Task { @MainActor in
+                        self?.deletionProgress = DeletionProgress(
+                            completed: completed,
+                            total: devicesToDelete.count,
+                            currentDeviceName: currentName,
+                            totalSizeBytes: totalSize
+                        )
+                    }
+                }
                 return try DeviceScanner.loadDevices(at: scanURL)
             }.value
 
@@ -204,9 +244,11 @@ final class DeviceScanner: ObservableObject {
             self.diskTotalBytes = disk.total
             self.diskAvailableBytes = disk.available
             self.isLoading = false
+            self.deletionProgress = nil
         } catch {
             self.errorMessage = error.localizedDescription
             self.isLoading = false
+            self.deletionProgress = nil
         }
     }
 
@@ -357,6 +399,46 @@ final class DeviceScanner: ObservableObject {
         guard !udids.isEmpty else { return }
         print("performDelete: deleting via FileManager for \(udids)")
         try deleteDeviceFolders(udids: udids, devicesRoot: devicesRoot)
+    }
+
+    nonisolated static func performDelete(
+        devices: [SimulatorDevice],
+        devicesRoot: URL,
+        progress: ((Int, String) -> Void)? = nil
+    ) throws {
+        guard !devices.isEmpty else { return }
+        print("performDelete: deleting \(devices.count) devices via FileManager")
+
+        let fm = FileManager.default
+        var errors: [String] = []
+
+        for (index, device) in devices.enumerated() {
+            progress?(index, device.name)
+
+            let url = devicesRoot.appending(path: device.udid)
+            guard fm.fileExists(atPath: url.path) else {
+                print("Device folder not found for \(device.udid) at \(url.path)")
+                continue
+            }
+            do {
+                try fm.removeItem(at: url)
+                print("Removed device folder at \(url.path)")
+            } catch {
+                let message = error.localizedDescription
+                errors.append("\(device.name): \(message)")
+                print("Failed to remove device folder for \(device.udid): \(message)")
+            }
+        }
+
+        progress?(devices.count, "")
+
+        if !errors.isEmpty {
+            throw NSError(
+                domain: "DeviceScanner",
+                code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "Delete errors: \(errors.joined(separator: "; "))"]
+            )
+        }
     }
 
     private nonisolated static func deleteDeviceFolders(udids: [String], devicesRoot: URL) throws {

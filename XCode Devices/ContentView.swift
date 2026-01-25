@@ -136,6 +136,11 @@ struct ContentView: View {
                 .presentationDetents([.fraction(0.6)])
                 .interactiveDismissDisabled()
         }
+        .overlay {
+            if let progress = viewModel.deletionProgress {
+                deletionProgressOverlay(progress: progress)
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -759,6 +764,56 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(28)
         .background(Color(.windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func deletionProgressOverlay(progress: DeletionProgress) -> some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                Image(systemName: "trash")
+                    .font(.system(size: 36, weight: .medium))
+                    .foregroundStyle(.red)
+                    .padding(.bottom, 4)
+
+                VStack(spacing: 8) {
+                    Text("Deleting simulators...")
+                        .font(.title3.weight(.semibold))
+
+                    Text(progress.label)
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                VStack(spacing: 8) {
+                    ProgressView(value: Double(progress.completed), total: Double(max(progress.total, 1)))
+                        .progressViewStyle(.linear)
+                        .frame(width: 280)
+
+                    if !progress.currentDeviceName.isEmpty {
+                        Text(progress.currentDeviceName)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Text("Freeing \(progress.sizeDescription)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(32)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.regularMaterial)
+                    .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
+            )
+        }
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.deletionProgress != nil)
     }
 
     private var filteredDevices: [SimulatorDevice] {
