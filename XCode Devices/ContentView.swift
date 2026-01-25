@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @FocusState private var isSearchFocused: Bool
     @State private var showPermissionSheet: Bool = false
+    @State private var showSupportSheet: Bool = false
 
     private let sizeColumnWidth: CGFloat = 90
     private let lastUsedColumnWidth: CGFloat = 150
@@ -50,6 +51,18 @@ struct ContentView: View {
             .background(.background)
         }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showSupportSheet = true
+                } label: {
+                    HStack {
+                        Image(systemName: "heart")
+                        Text("Support Author")
+                    }
+                    .padding(.horizontal)
+                }
+                .help("Support Author")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     viewModel.refresh()
@@ -135,6 +148,9 @@ struct ContentView: View {
             permissionRequestSheet
                 .presentationDetents([.fraction(0.6)])
                 .interactiveDismissDisabled()
+        }
+        .sheet(isPresented: $showSupportSheet) {
+            SupportAuthorView()
         }
         .overlay {
             if let progress = viewModel.deletionProgress {
