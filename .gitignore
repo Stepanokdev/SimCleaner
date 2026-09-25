@@ -1,1 +1,24 @@
+# macOS
+.DS_Store
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Build output
 /build
+DerivedData/
+*.xcresult
+*.xcarchive
+*.dSYM.zip
+*.ipa
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Local working notes and generated reports
+artifacts/
+features-request.md
