@@ -24,6 +24,7 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
     @State private var showPermissionSheet: Bool = false
     @State private var showSupportSheet: Bool = false
+    @State private var showRuntimeSheet: Bool = false
 
     private let sizeColumnWidth: CGFloat = 90
     private let lastUsedColumnWidth: CGFloat = 150
@@ -116,7 +117,7 @@ struct ContentView: View {
                     await viewModel.delete(devices: [device])
                     deletionInProgress.remove(device.udid)
                     devicePendingDeletion = nil
-                    if viewModel.errorMessage == nil {
+                    if viewModel.errorMessage == nil && viewModel.deletionError == nil {
                         ratingManager.recordSuccessfulDeletion()
                     }
                 }
@@ -125,7 +126,8 @@ struct ContentView: View {
                 devicePendingDeletion = nil
             }
         } message: { device in
-            Text("\(device.name)\n\(device.runtime)\nUDID: \(device.udid)")
+            let runningNote = device.isBooted ? "\n\nThis simulator is running. Shut it down in Simulator before deleting it." : ""
+            Text("\(device.name)\n\(device.runtime)\nUDID: \(device.udid)\(runningNote)")
         }
         .alert(
             "Delete selected simulators?",
@@ -139,7 +141,7 @@ struct ContentView: View {
                     await viewModel.delete(devices: selection)
                     deletionInProgress.subtract(ids)
                     selectionPendingDeletion = nil
-                    if viewModel.errorMessage == nil {
+                    if viewModel.errorMessage == nil && viewModel.deletionError == nil {
                         ratingManager.recordSuccessfulDeletion()
                     }
                 }
@@ -149,7 +151,21 @@ struct ContentView: View {
             }
         } message: { selection in
             let totalSize = selection.reduce(0) { $0 + $1.sizeBytes }
-            Text("\(selection.count) simulators • \(ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file))")
+            let runningCount = selection.filter(\.isBooted).count
+            let runningNote = runningCount > 0 ? "\n\n\(runningCount) of them \(runningCount == 1 ? "is" : "are") running. Shut \(runningCount == 1 ? "it" : "them") down in Simulator first." : ""
+            Text("\(selection.count) simulators • \(ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file))\(runningNote)")
+        }
+        .alert(
+            "Some simulators weren't deleted",
+            isPresented: Binding(
+                get: { viewModel.deletionError != nil },
+                set: { if !$0 { viewModel.deletionError = nil } }
+            ),
+            presenting: viewModel.deletionError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { message in
+            Text("The list now shows what's left on disk.\n\n\(message)")
         }
         .sheet(isPresented: $showPermissionSheet) {
             permissionRequestSheet
@@ -158,6 +174,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSupportSheet) {
             SupportAuthorView()
+        }
+        .sheet(isPresented: $showRuntimeSheet) {
+            RuntimeStorageSheet(runtimeStorageBytes: viewModel.runtimeStorageBytes)
         }
         .overlay {
             if let progress = viewModel.deletionProgress {
@@ -311,17 +330,18 @@ struct ContentView: View {
             Divider()
 
             Group {
-                if !viewModel.hasFolderAccess {
+                switch listState {
+                case .needsAccess:
                     accessPlaceholder
-                } else if let errorMessage = viewModel.errorMessage {
+                case .error(let errorMessage):
                     VStack(spacing: 8) {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
-                        Text("Sandboxed app needs read/write permission to the simulator folder.")
+                        Text("SimCleaner needs read and write access to your Developer folder.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                         VStack(spacing: 6) {
-                            Button("Allow access to Devices folder…") {
+                            Button("Choose Developer Folder…") {
                                 viewModel.chooseDevicesDirectory()
                             }
                             .buttonStyle(.borderedProminent)
@@ -333,19 +353,17 @@ struct ContentView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else if viewModel.isLoading && viewModel.devices.isEmpty {
-//                    loadingPlaceholder
+                case .loading:
                     EmptyView()
-                } else if filteredDevices.isEmpty {
-                    VStack(spacing: 8) {
-                        Label("No simulators found", systemImage: "archivebox")
-                            .foregroundStyle(.secondary)
-                        Text("Check filters or refresh the list.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                case .runtimeFolder, .unreadableFolders, .noDeviceFolders, .noSimulators:
+                    noSimulatorsPlaceholder(listState)
+                case .noMatches:
+                    ContentUnavailableView {
+                        Label("No matching simulators", systemImage: "line.3.horizontal.decrease.circle")
+                    } description: {
+                        Text("Try another filter or clear the search.")
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else {
+                case .list:
                     Table(sortedDevices, selection: tableSelection, sortOrder: $sortOrder) {
                         TableColumn("Type", value: \.deviceType) { device in
                             HStack(spacing: 12) {
@@ -355,10 +373,15 @@ struct ContentView: View {
                                     Text(device.name)
                                         .font(.headline)
                                         .lineLimit(1)
-                                    Text(device.runtime)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        Text(device.runtime)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                        if let badge = device.setKind.badge {
+                                            Tag(text: badge)
+                                        }
+                                    }
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -369,7 +392,7 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         .width(sizeColumnWidth)
-                        TableColumn("Last launch", value: \.lastUsedSortKey) { device in
+                        TableColumn("Last used", value: \.lastUsedSortKey) { device in
                             Text(device.lastUsedDescription)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
@@ -408,22 +431,161 @@ struct ContentView: View {
     }
 
     private var listHeader: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Simulators")
-                    .font(.headline)
-                Text("\(filteredDevices.count) of \(viewModel.devices.count) • \(formatBytes(viewModel.totalSizeBytes)) total")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Simulators")
+                        .font(.headline)
+                    Text("\(filteredDevices.count) of \(viewModel.devices.count) • \(formatBytes(viewModel.totalSizeBytes)) total")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                TextField("Search by name, OS, or UDID", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 260)
+                    .focused($isSearchFocused)
             }
-            Spacer()
-            TextField("Search by name, OS, or UDID", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 260)
-                .focused($isSearchFocused)
+
+            if viewModel.hasFolderAccess {
+                scanLocationRow
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private var scanLocationRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Group {
+                    Image(systemName: "folder")
+                    Text(displayPath(viewModel.devicesURL))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(viewModel.devicesURL.path)
+                }
+                .foregroundStyle(.secondary)
+                Button("Change…") {
+                    viewModel.chooseDevicesDirectory()
+                }
+                .buttonStyle(.link)
+                .disabled(viewModel.isLoading)
+            }
+            .font(.caption)
+
+            if viewModel.hasCompletedScan && !viewModel.coversDeveloperFolder && !viewModel.devices.isEmpty {
+                HStack(spacing: 6) {
+                    Group {
+                        Image(systemName: "info.circle")
+                        Text("Xcode also keeps Preview devices and test clones elsewhere in ~/Library/Developer.")
+                    }
+                    .foregroundStyle(.secondary)
+                    Button("Include them…") {
+                        viewModel.chooseDevicesDirectory()
+                    }
+                    .buttonStyle(.link)
+                    .disabled(viewModel.isLoading)
+                }
+                .font(.caption)
+            }
+
+            if viewModel.isScanPartial && !viewModel.devices.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("\(unreadableSummary) Some simulators may be missing.")
+                        .foregroundStyle(.secondary)
+                    Button("Choose Folder Again…") {
+                        viewModel.chooseDevicesDirectory()
+                    }
+                    .buttonStyle(.link)
+                    .disabled(viewModel.isLoading)
+                }
+                .font(.caption)
+            }
+
+            if viewModel.unrecognizedSizeBytes > 0 {
+                Text("\(viewModel.unrecognizedFolderCount) leftover \(viewModel.unrecognizedFolderCount == 1 ? "folder" : "folders") without simulator info (\(formatBytes(viewModel.unrecognizedSizeBytes))) \(viewModel.unrecognizedFolderCount == 1 ? "isn't" : "aren't") listed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var listState: SimulatorListState {
+        SimulatorListState.resolve(
+            hasFolderAccess: viewModel.hasFolderAccess,
+            scannedURL: viewModel.devicesURL,
+            errorMessage: viewModel.errorMessage,
+            isLoading: viewModel.isLoading,
+            hasCompletedScan: viewModel.hasCompletedScan,
+            deviceCount: viewModel.devices.count,
+            filteredCount: filteredDevices.count,
+            deviceSetCount: viewModel.deviceSets.count,
+            isScanPartial: viewModel.isScanPartial
+        )
+    }
+
+    @ViewBuilder
+    private func noSimulatorsPlaceholder(_ state: SimulatorListState) -> some View {
+        ContentUnavailableView {
+            switch state {
+            case .runtimeFolder:
+                Label("This folder holds simulator runtimes", systemImage: "externaldrive")
+            case .unreadableFolders:
+                Label("Some simulator folders couldn't be read", systemImage: "exclamationmark.triangle")
+            case .noDeviceFolders:
+                Label("No simulators in this folder", systemImage: "folder.badge.questionmark")
+            default:
+                Label("No simulators found", systemImage: "archivebox")
+            }
+        } description: {
+            switch state {
+            case .runtimeFolder:
+                Text("Runtimes are the iOS system images that simulators run on. Xcode manages them, and SimCleaner can't delete them. To find your simulators, choose the Developer folder in your Library.")
+            case .unreadableFolders:
+                Text("\(unreadableSummary) Your simulators may be there. Choose ~/Library/Developer again to give SimCleaner access.")
+            case .noDeviceFolders:
+                Text("Xcode keeps simulators in the Developer folder inside your Library (~/Library/Developer). Choose that folder and SimCleaner will find all of them.")
+            default:
+                Text("Xcode hasn't created any simulators here. If you're looking for gigabytes of simulator data, it's probably in runtimes, which Xcode manages.")
+            }
+        } actions: {
+            if state != .noSimulators {
+                Button("Choose Developer Folder…") {
+                    viewModel.chooseDevicesDirectory()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            Button("About Runtimes") {
+                showRuntimeSheet = true
+            }
+        }
+    }
+
+    /// "Couldn't open XCTestDevices." / "Couldn't read 2 simulators." for the partial-scan notices.
+    private var unreadableSummary: String {
+        var parts: [String] = []
+        let locations = viewModel.unreadableLocations
+        if let first = locations.first {
+            let name = first.lastPathComponent
+            parts.append(locations.count == 1 ? "Couldn't open \(name)." : "Couldn't open \(name) and \(locations.count - 1) more \(locations.count == 2 ? "folder" : "folders").")
+        }
+        let devices = viewModel.unreadableDeviceCount
+        if devices > 0 {
+            parts.append("Couldn't read \(devices) \(devices == 1 ? "simulator" : "simulators").")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    /// Shows the path with ~ for the real home folder (the sandbox would otherwise abbreviate the container path).
+    private func displayPath(_ url: URL) -> String {
+        let home = DeviceScanner.realHomeDirectory.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        if path == home { return "~" }
+        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+        return path
     }
 
     @ViewBuilder
@@ -486,6 +648,17 @@ struct ContentView: View {
                                 Text(device.deviceType)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if device.setKind.badge != nil || device.isBooted {
+                                    HStack(spacing: 6) {
+                                        if let badge = device.setKind.badge {
+                                            Tag(text: badge)
+                                        }
+                                        if device.isBooted {
+                                            Tag(text: "Running")
+                                        }
+                                    }
+                                    .padding(.top, 4)
+                                }
                             }
                         }
                     }
@@ -706,6 +879,18 @@ struct ContentView: View {
                 Text(storageSummary)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                Button {
+                    showRuntimeSheet = true
+                } label: {
+                    if let runtimeBytes = viewModel.runtimeStorageBytes {
+                        Label("Runtimes: \(formatBytes(runtimeBytes))", systemImage: "info.circle")
+                    } else {
+                        Label("About runtimes", systemImage: "info.circle")
+                    }
+                }
+                .buttonStyle(.link)
+                .font(.callout)
+                .help("Simulator runtimes are managed by Xcode and aren't counted here")
             }
 
             StorageBar(
@@ -734,9 +919,9 @@ struct ContentView: View {
             Image(systemName: "folder.badge.questionmark")
                 .font(.system(size: 32, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text("Access to the simulator Devices folder is required.")
+            Text("SimCleaner needs access to your Developer folder.")
                 .font(.headline)
-            Text("Select the CoreSimulator Devices folder to manage and clean your simulators.")
+            Text("Choose ~/Library/Developer. That's where Xcode keeps simulators, Preview devices and test clones.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -745,7 +930,7 @@ struct ContentView: View {
                 showPermissionSheet = true
             }
             .buttonStyle(.borderedProminent)
-            Text(viewModel.devicesURL.path)
+            Text(displayPath(DeviceScanner.developerFolderURL))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -762,10 +947,10 @@ struct ContentView: View {
                 .frame(width: 120, height: 120)
                 .padding(.top, 8)
             VStack(spacing: 6) {
-                Text("Allow access to simulator Devices folder")
+                Text("Allow access to your Developer folder")
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
-                Text("To manage your Xcode simulators, the app needs permission to read and delete items in the simulator Devices folder located in your Library.")
+                Text("Xcode stores simulators in several places inside ~/Library/Developer. Give SimCleaner access to that folder and it will find all of them. It only deletes the simulators you choose.")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
@@ -844,7 +1029,7 @@ struct ContentView: View {
         let devices = viewModel.devices.filter { device in
             guard passesFilter(device) else { return false }
             guard !trimmed.isEmpty else { return true }
-            let haystack = "\(device.name) \(device.deviceType) \(device.runtime) \(device.udid)".lowercased()
+            let haystack = "\(device.name) \(device.deviceType) \(device.runtime) \(device.udid) \(device.setKind.badge ?? "")".lowercased()
             return haystack.contains(trimmed.lowercased())
         }
 
@@ -977,7 +1162,12 @@ struct ContentView: View {
     }
 
     private func runSimulator(_ device: SimulatorDevice) {
-        let simulatorApp = URL(fileURLWithPath: "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app")
+        // Xcode may be installed as Xcode-beta.app or under another name, so ask Launch Services first.
+        let workspace = NSWorkspace.shared
+        let simulatorApp = workspace.urlForApplication(withBundleIdentifier: "com.apple.iphonesimulator")
+            ?? workspace.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode")?
+                .appending(path: "Contents/Developer/Applications/Simulator.app")
+            ?? URL(fileURLWithPath: "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app")
         let config = NSWorkspace.OpenConfiguration()
         config.arguments = ["-CurrentDeviceUDID", device.udid]
         NSWorkspace.shared.openApplication(at: simulatorApp, configuration: config)
