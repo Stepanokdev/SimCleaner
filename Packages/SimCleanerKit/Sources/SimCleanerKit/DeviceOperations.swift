@@ -124,6 +124,27 @@ public struct DeviceController: Sendable {
         }
     }
 
+    /// Deletes a simulator only while CoreSimulator lists it as shut down: for cleanups nobody checks item by
+    /// item. One that's running is never stopped for them, and one CoreSimulator doesn't list is not removed
+    /// as a folder; both are left alone with a `CleanupSkip`.
+    public func deleteIfShutDown(_ device: SimulatorDevice) async throws {
+        let simctl = try requireSimctl()
+        guard let current = try await currentState(of: device, using: simctl) else {
+            throw CleanupSkip("CoreSimulator doesn't list it any more.")
+        }
+        guard current.deviceState == .shutdown else {
+            throw CleanupSkip("It's \(current.deviceState.title.lowercased()).")
+        }
+        do {
+            try await simctl.delete(device.udid, in: device.deviceSet)
+        } catch let error as SimctlError {
+            throw DeviceOperationError.simctl(error.localizedDescription)
+        }
+        if try await currentState(of: device, using: simctl) != nil {
+            throw DeviceOperationError.notRemoved
+        }
+    }
+
     /// Removes a device folder nothing can be using: CoreSimulator said it doesn't list it, or isn't on this
     /// Mac. Proves first that it's the same folder that was scanned and that device.plist says shut down.
     public func removeLeftoverDeviceFolder(_ device: SimulatorDevice) throws {

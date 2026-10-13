@@ -52,6 +52,23 @@ struct FreedSpace<Item> {
     }
 }
 
+/// What one batch of operations did. `cleaned` holds the items that freed something.
+struct BatchOutcome<Item> {
+    var cleaned: [Item] = []
+    var freedBytes: Int64 = 0
+    var failures: [String] = []
+    /// Items left alone because they changed or came into use since they were planned: not failures.
+    var skipped: [String] = []
+}
+
+/// What a Smart Cleanup did, for its page to say.
+struct SmartCleanupResult: Equatable {
+    let freedBytes: Int64
+    let removed: Int
+    let skipped: [String]
+    let failures: [String]
+}
+
 /// What went wrong in the last batch, so the window can say it instead of failing silently.
 struct OperationReport: Identifiable, Equatable {
     let id = UUID()
@@ -96,6 +113,17 @@ final class DeviceScanner: ObservableObject {
 
     // Work in progress: item ID → what is happening to it. Simulators are keyed by `SimulatorDevice.id`,
     // their folder, which names both the device set and the UDID.
+    // Smart Cleanup
+    /// What Smart Cleanup would remove now, planned again whenever the scans or `smartIdleDays` change. Nil
+    /// until the first plan is ready.
+    @Published private(set) var smartPlan: SmartCleanupPlan?
+    /// How long something has to go unused for Smart Cleanup; the page's "Not used for" sets it.
+    @Published var smartIdleDays = 14
+    @Published private(set) var isCleaningUp = false
+    @Published private(set) var lastSmartCleanup: SmartCleanupResult?
+    private var smartPlanGeneration = 0
+    private var smartPlanUpdates: AnyCancellable?
+
     @Published private(set) var busy: [String: String] = [:]
     @Published private(set) var bulkProgress: BulkProgress?
     @Published var report: OperationReport?
@@ -143,6 +171,10 @@ final class DeviceScanner: ObservableObject {
         } else {
             self.devicesURL = developerFolder
         }
+        // Simulator scans, cache scans and the period change on their own schedules; the plan follows all three.
+        smartPlanUpdates = Publishers.CombineLatest3($devices, $developerStorage, $smartIdleDays)
+            .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+            .sink { [weak self] _, _, _ in self?.planSmartCleanup() }
     }
 
     // MARK: - Derived state
@@ -240,6 +272,7 @@ final class DeviceScanner: ObservableObject {
         errorMessage = nil
         scanProgress = nil
         let simctl = capabilities?.simctlTool.map { SimctlClient(tool: $0, runner: runner) }
+        let seesRuntimes = capabilities.map { !$0.isSandboxed } ?? false
 
         Task.detached(priority: .userInitiated) { [weak self] in
             let outcome = Result {
@@ -249,7 +282,7 @@ final class DeviceScanner: ObservableObject {
             }
             var merged = outcome
             if case .success(let result) = outcome, let simctl {
-                merged = .success(await Self.mergeLiveState(into: result, using: simctl))
+                merged = .success(await Self.mergeLiveState(into: result, using: simctl, seesRuntimes: seesRuntimes))
             }
             let volume = VolumeSpace.of(scanURL)
             await self?.finishScan(merged, volume: volume, generation: generation)
@@ -258,7 +291,11 @@ final class DeviceScanner: ObservableObject {
 
     /// Adds what CoreSimulator reports right now: running state and availability. A set simctl can't
     /// list keeps the state from device.plist instead of being treated as empty.
-    nonisolated static func mergeLiveState(into result: ScanResult, using simctl: SimctlClient) async -> ScanResult {
+    ///
+    /// Availability only counts when simctl `seesRuntimes`. Inside the App Sandbox CoreSimulator can't see
+    /// any runtime, so simctl calls every simulator unavailable ("runtime profile not found"); taken at its
+    /// word, the App Store edition would offer to delete them all. There it stays unknown instead.
+    nonisolated static func mergeLiveState(into result: ScanResult, using simctl: SimctlClient, seesRuntimes: Bool) async -> ScanResult {
         var live: [String: SimctlDevice] = [:]
         var listedSets: Set<String> = []
         for set in result.deviceSets {
@@ -271,8 +308,10 @@ final class DeviceScanner: ObservableObject {
             guard listedSets.contains(device.deviceSet.url.path) else { return device }
             if let listed = live[device.udid] {
                 device.liveState = listed.deviceState
-                device.isAvailable = listed.isAvailable
-                device.availabilityError = listed.availabilityError
+                if seesRuntimes {
+                    device.isAvailable = listed.isAvailable
+                    device.availabilityError = listed.availabilityError
+                }
                 device.isKnownToSimctl = true
             } else {
                 device.isKnownToSimctl = false
@@ -419,7 +458,7 @@ final class DeviceScanner: ObservableObject {
         let controller = controller
         let deleted = await perform("Deleting", title: "Some simulators weren't deleted", items: devices, id: \.id, name: \.name, freed: .removing { [$0.rootPath] }) { device in
             try await controller.delete(device)
-        }
+        }.cleaned
         // The rescan below confirms it; until then the list and the storage bar don't show what's gone.
         let ids = Set(deleted.map(\.id))
         self.devices.removeAll { ids.contains($0.id) }
@@ -477,7 +516,7 @@ final class DeviceScanner: ObservableObject {
         let controller = controller
         let removed = await perform("Removing", title: "Some leftover folders weren't removed", items: items, id: \.id, name: { $0.url.lastPathComponent }, freed: .removing { [$0.url] }) { item in
             try controller.removeLeftover(item)
-        }
+        }.cleaned
         let ids = Set(removed.map(\.id))
         leftovers.removeAll { ids.contains($0.id) }
     }
@@ -486,7 +525,7 @@ final class DeviceScanner: ObservableObject {
         let developer = developerFolder
         let removed = await perform("Removing", title: "Some items weren't removed", items: items, id: \.id, name: \.title, freed: .removing { [$0.url] }, rescanDevices: false) { item in
             try DeveloperStorageScanner.remove(item, developerFolder: developer)
-        }
+        }.cleaned
         let ids = Set(removed.map(\.id))
         developerStorage = DeveloperStorageReport(items: developerStorage.items.filter { !ids.contains($0.id) }, unreadableLocations: developerStorage.unreadableLocations)
         refreshDeveloperStorage(force: true)
@@ -507,10 +546,77 @@ final class DeviceScanner: ObservableObject {
             if try await simctl.listRuntimeImages().contains(where: { $0.identifier == imageID }) {
                 throw DeviceOperationError.simctl("CoreSimulator still lists \(runtime.title). It may be removed after a restart; if it stays, delete it in Xcode › Settings › Components.")
             }
-        }
+        }.cleaned
         let ids = Set(deleted.map(\.id))
         runtimes.removeAll { ids.contains($0.id) }
         refreshRuntimes(force: true)
+    }
+
+    /// Removes what `plan` lists in `groups`, after reading each item again right before it goes: one that
+    /// changed or came into use since the plan is left alone and listed as skipped. Simulators go only
+    /// while CoreSimulator lists them as shut down. The space it frees counts once, as one cleanup, and
+    /// what failed is reported once.
+    @discardableResult
+    func cleanUp(_ plan: SmartCleanupPlan, groups: Set<SmartCleanupPlan.Group>) async -> SmartCleanupResult {
+        isCleaningUp = true
+        defer { isCleaningUp = false }
+        let targets = plan.targets.filter { groups.contains($0.group) }
+        let simulators = targets.filter { if case .simulator = $0.item { return true } else { return false } }
+        let folders = targets.filter { if case .folder = $0.item { return true } else { return false } }
+        let controller = controller
+        let developer = developerFolder
+        let idleDays = plan.idleDays
+        report = nil
+
+        let deleted = await perform("Deleting", title: "", items: simulators, id: \.id, name: \.name, freed: .removing { [$0.url] }, finalize: false) { target in
+            if let reason = SmartCleanupPlan.recheck(target, idleDays: idleDays) { throw CleanupSkip(reason) }
+            guard case .simulator(let device) = target.item else { return }
+            try await controller.deleteIfShutDown(device)
+        }
+        let removed = await perform("Removing", title: "", items: folders, id: \.id, name: \.name, freed: .removing { [$0.url] }, rescanDevices: false, finalize: false) { target in
+            if let reason = SmartCleanupPlan.recheck(target, idleDays: idleDays) { throw CleanupSkip(reason) }
+            guard case .folder(let item) = target.item else { return }
+            try DeveloperStorageScanner.remove(item, developerFolder: developer)
+        }
+
+        let gone = Set((deleted.cleaned + removed.cleaned).map(\.id))
+        devices.removeAll { gone.contains($0.id) }
+        if !removed.cleaned.isEmpty {
+            developerStorage = DeveloperStorageReport(items: developerStorage.items.filter { !gone.contains($0.id) }, unreadableLocations: developerStorage.unreadableLocations)
+            refreshDeveloperStorage(force: true)
+        }
+        let result = SmartCleanupResult(
+            freedBytes: deleted.freedBytes + removed.freedBytes,
+            removed: gone.count,
+            skipped: deleted.skipped + removed.skipped,
+            failures: deleted.failures + removed.failures
+        )
+        volume = VolumeSpace.of(devicesURL)
+        cleanupSession?.add(result.freedBytes)
+        if !result.failures.isEmpty {
+            report = OperationReport(title: "Smart Cleanup didn't remove everything", failures: result.failures)
+        } else if result.freedBytes > 0 {
+            EditionHooks.cleanupSucceeded()
+        }
+        lastSmartCleanup = result
+        return result
+    }
+
+    /// Plans Smart Cleanup for what's scanned now. Reading the dates means reading the disk, so it runs off
+    /// the main thread, and a newer plan replaces one still being made.
+    func planSmartCleanup() {
+        smartPlanGeneration += 1
+        let generation = smartPlanGeneration
+        let devices = devices, storage = developerStorage, idleDays = smartIdleDays
+        Task.detached(priority: .utility) { [weak self] in
+            let plan = SmartCleanupPlan.make(devices: devices, storage: storage, idleDays: idleDays)
+            await self?.finishSmartPlan(plan, generation: generation)
+        }
+    }
+
+    private func finishSmartPlan(_ plan: SmartCleanupPlan, generation: Int) {
+        guard generation == smartPlanGeneration else { return }
+        smartPlan = plan
     }
 
     /// Runs `operation` on each item in turn, marks each row busy while it runs, collects failures
@@ -521,7 +627,11 @@ final class DeviceScanner: ObservableObject {
     /// For a cleanup, `freed` measures each item right before it runs, once this window holds it, and then
     /// says how much space it gave back. It's asked even when the operation failed, because files can be
     /// gone by then, but never about an item that wasn't there to begin with. The batch's total goes to the
-    /// cleanup session once, and the items that freed something are returned.
+    /// cleanup session once. An operation that throws `CleanupSkip` left the item alone on purpose: it's
+    /// listed as skipped, not failed.
+    ///
+    /// With `finalize` false the batch is part of a larger cleanup: the outcome is returned and the caller
+    /// reports it and credits the session, once for all its batches.
     @discardableResult
     private func perform<Item>(
         _ verb: String,
@@ -532,21 +642,20 @@ final class DeviceScanner: ObservableObject {
         locks: ((Item) -> [String])? = nil,
         freed: FreedSpace<Item>? = nil,
         rescanDevices: Bool = true,
+        finalize: Bool = true,
         operation: (Item) async throws -> Void
-    ) async -> [Item] {
-        guard !items.isEmpty else { return [] }
-        report = nil
+    ) async -> BatchOutcome<Item> {
+        guard !items.isEmpty else { return BatchOutcome() }
+        if finalize { report = nil }
         // A simulator scan that started before this would list what's about to change; the rescan below
         // replaces it.
         if rescanDevices { scanGeneration += 1 }
-        var failures: [String] = []
-        var cleaned: [Item] = []
-        var freedBytes: Int64 = 0
+        var outcome = BatchOutcome<Item>()
         for (index, item) in items.enumerated() {
             let keys = locks?(item) ?? [item[keyPath: id]]
             // Another window has its own list and could start the same work; the claim is app-wide.
             guard !keys.contains(where: { busy[$0] != nil }), Self.claim(keys) else {
-                failures.append("\(name(item)): another action on it hasn't finished yet. Try again when it's done.")
+                outcome.failures.append("\(name(item)): another action on it hasn't finished yet. Try again when it's done.")
                 continue
             }
             for key in keys { busy[key] = "\(verb)…" }
@@ -555,32 +664,37 @@ final class DeviceScanner: ObservableObject {
             var succeeded = true
             do {
                 try await operation(item)
+            } catch let skip as CleanupSkip {
+                succeeded = false
+                outcome.skipped.append("\(name(item)): \(skip.reason)")
             } catch {
                 succeeded = false
-                failures.append("\(name(item)): \(error.localizedDescription)")
+                outcome.failures.append("\(name(item)): \(error.localizedDescription)")
             }
             if let credit {
                 let bytes = await credit(succeeded)
                 if bytes > 0 {
-                    freedBytes += bytes
-                    cleaned.append(item)
+                    outcome.freedBytes += bytes
+                    outcome.cleaned.append(item)
                 }
             }
             for key in keys { busy[key] = nil }
             Self.release(keys)
         }
         bulkProgress = nil
-        if !failures.isEmpty {
-            report = OperationReport(title: title, failures: failures)
-        } else if freed != nil {
-            EditionHooks.cleanupSucceeded()
-        }
-        if freed != nil {
-            volume = VolumeSpace.of(devicesURL)
-            cleanupSession?.add(freedBytes)
+        if finalize {
+            if !outcome.failures.isEmpty {
+                report = OperationReport(title: title, failures: outcome.failures)
+            } else if freed != nil {
+                EditionHooks.cleanupSucceeded()
+            }
+            if freed != nil {
+                volume = VolumeSpace.of(devicesURL)
+                cleanupSession?.add(outcome.freedBytes)
+            }
         }
         if rescanDevices { refresh() }
-        return cleaned
+        return outcome
     }
 
     /// Keys of everything any window is working on.

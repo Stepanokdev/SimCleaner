@@ -113,15 +113,20 @@ struct ContentView: View {
     private let recentThreshold: TimeInterval = 60 * 60 * 24 * 14
 
     var body: some View {
+        // The storage panel below covers the bottom of all three columns: NavigationSplitView doesn't hand the
+        // window's bottom inset on to them. Each column keeps its last rows and its buttons clear of it.
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
+                .clearsStoragePanel()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
         } content: {
             contentColumn
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clearsStoragePanel()
                 .navigationSplitViewColumnWidth(min: 560, ideal: 760)
         } detail: {
             detailColumn
+                .clearsStoragePanel()
                 .navigationSplitViewColumnWidth(min: 300, ideal: 320, max: 380)
         }
         .navigationSplitViewStyle(.balanced)
@@ -164,11 +169,16 @@ struct ContentView: View {
         }
         .onAppear {
             selection = SidebarSelection(storageKey: lastPage)
+            // The sidebar shows what Smart Cleanup can remove before its page is ever opened.
+            scanner.smartIdleDays = idleDays
             scanner.start()
             if !scanner.hasFolderAccess { showPermissionSheet = true }
         }
         .onChange(of: selection) { _, page in
             lastPage = page.storageKey
+        }
+        .onChange(of: idleDays) { _, days in
+            scanner.smartIdleDays = days
         }
         .onChange(of: scanner.hasFolderAccess) { _, hasAccess in
             if hasAccess { showPermissionSheet = false }
@@ -243,7 +253,7 @@ struct ContentView: View {
     private var contentColumn: some View {
         switch selection {
         case .suggestions:
-            SuggestionsView(scanner: scanner, idleDays: $idleDays) { action in
+            SmartCleanupView(scanner: scanner, idleDays: $idleDays) { action in
                 pendingAction = action
             } showDevice: { device in
                 selection = .all
@@ -356,8 +366,8 @@ struct ContentView: View {
             }
 
             Section("Clean Up") {
-                sidebarRow("Suggestions", systemImage: "wand.and.sparkles", detail: suggestionsSubtitle, for: .suggestions)
-                    .help("Simulators you haven't used, ones that can't run here, and leftover folders")
+                sidebarRow("Smart Cleanup", systemImage: "wand.and.sparkles", detail: suggestionsSubtitle, for: .suggestions)
+                    .help("What can go without a second thought, and suggestions for the rest")
                 sidebarRow("Xcode caches", systemImage: "hammer", detail: xcodeCachesSubtitle, for: .xcodeCaches)
                     .help("DerivedData, device support files and coding agent workspaces")
                 sidebarRow("Runtimes", systemImage: "externaldrive", detail: scanner.runtimes.isEmpty ? "" : ByteText.string(scanner.runtimesFootprintBytes), for: .runtimes)
@@ -382,9 +392,9 @@ struct ContentView: View {
         Binding(get: { selection }, set: { if let page = $0 { selection = page } })
     }
 
-    /// Up to what the suggestions free; the page says how sharing makes it a range.
+    /// What Smart Cleanup can remove now; the page says how sharing makes it a range.
     private var suggestionsSubtitle: String {
-        let total = scanner.cleanupSuggestions(idleDays: idleDays).reduce(DiskFootprint.zero) { $0 + $1.footprint }
+        let total = scanner.smartPlan?.footprint ?? .zero
         return total.allocatedBytes > 0 ? ByteText.string(total.allocatedBytes) : ""
     }
 

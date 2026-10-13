@@ -42,34 +42,43 @@ nonisolated enum SuggestionsState: Equatable {
     }
 }
 
-/// Groups of simulators worth cleaning, each with the reason and one action.
-struct SuggestionsView: View {
+/// Smart Cleanup on top: one button for what Xcode makes again by itself and nothing used for the chosen
+/// period, preselected the way CleanMyMac's Smart Care is. Below it, what's up to the person: simulators and
+/// folders that hold something they may want, each with its own button.
+struct SmartCleanupView: View {
     @ObservedObject var scanner: DeviceScanner
     @Binding var idleDays: Int
     let onAction: (PendingDeviceAction) -> Void
     let showDevice: (SimulatorDevice) -> Void
 
     @State private var pendingLeftovers: [LeftoverFolder]?
+    @State private var selectedGroups = Set(SmartCleanupPlan.Group.allCases)
+    @State private var expandedGroups: Set<SmartCleanupPlan.Group> = []
+    /// The plan as it was when Clean Up was pressed: what the dialog lists is exactly what may go.
+    @State private var confirming: SmartCleanupConfirmation?
 
     var body: some View {
-        let suggestions = scanner.cleanupSuggestions(idleDays: idleDays)
-        let total = suggestions.reduce(DiskFootprint.zero) { $0 + $1.footprint }
+        let plan = scanner.smartPlan
+        let planned = Set(plan?.targets.map(\.id) ?? [])
+        // Smart Cleanup already takes care of these; offering them twice could also mean two actions on one item.
+        let suggestions = scanner.cleanupSuggestions(idleDays: idleDays).compactMap { $0.excluding(planned) }
         let state = SuggestionsState.resolve(
             hasFolderAccess: scanner.hasFolderAccess,
             errorMessage: scanner.errorMessage,
             hasCompletedScan: scanner.hasCompletedScan,
             isScanPartial: scanner.isScanPartial,
-            suggestionCount: suggestions.count
+            suggestionCount: suggestions.count + ((plan?.targets.isEmpty ?? true) ? 0 : 1)
         )
 
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Suggestions")
+                    Text("Smart Cleanup")
                         .font(.headline)
-                    Text(state.subtitle(total: total))
+                    Text(subtitle(state: state, plan: plan, suggestions: suggestions))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
                 Spacer()
                 Picker("Not used for", selection: $idleDays) {
@@ -85,8 +94,8 @@ struct SuggestionsView: View {
             if let bulk = scanner.bulkProgress {
                 BulkProgressStrip(progress: bulk)
             }
-            if state == .suggestions(isPartial: true) {
-                // The suggestions stay; they just may not be all of them.
+            if state == .suggestions(isPartial: true) || state == .nothingInWhatWasRead {
+                // What's listed stays; it just may not be all of it.
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
@@ -119,46 +128,24 @@ struct SuggestionsView: View {
             case .scanning:
                 ProgressView("Scanning simulators…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .nothingInWhatWasRead:
-                ContentUnavailableView {
-                    Label("Nothing to suggest in what SimCleaner could read", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text("\(scanner.unreadableSummary) The rest has nothing worth cleaning, but SimCleaner can't speak for what it couldn't read.")
-                } actions: {
-                    Button("Scan Again") { scanner.refresh() }
-                        .disabled(scanner.isLoading)
-                    if scanner.isSandboxed {
-                        Button("Choose Developer Folder…") { scanner.chooseDevicesDirectory() }
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .nothingToClean:
-                ContentUnavailableView {
-                    Label("Nothing to clean up", systemImage: "checkmark.circle")
-                } description: {
-                    Text("SimCleaner suggests simulators you haven't used for \(idleDays) days, ones that can't run on this Mac and leftover folders. Xcode caches and runtimes have their own pages.")
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .suggestions:
+            case .nothingToClean, .nothingInWhatWasRead, .suggestions:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 28) {
-                        ForEach(suggestions) { suggestion in
-                            SuggestionSection(
-                                suggestion: suggestion,
-                                scanner: scanner,
-                                showDevice: showDevice
-                            ) {
-                                switch suggestion.action {
-                                case .erase where scanner.canManageDevices:
-                                    onAction(PendingDeviceAction(kind: .erase, devices: suggestion.devices))
-                                case .erase, .delete:
-                                    if suggestion.devices.isEmpty {
-                                        pendingLeftovers = suggestion.leftovers
-                                    } else {
-                                        onAction(PendingDeviceAction(kind: .delete, devices: suggestion.devices))
-                                    }
-                                }
-                            }
+                        SmartCleanupCard(
+                            plan: plan,
+                            isPlanning: plan == nil || !scanner.hasScannedDeveloperStorage && scanner.coversDeveloperFolder,
+                            isCleaning: scanner.isCleaningUp,
+                            canDeleteSimulators: scanner.canManageDevices,
+                            result: scanner.lastSmartCleanup,
+                            idleDays: idleDays,
+                            selectedGroups: $selectedGroups,
+                            expandedGroups: $expandedGroups,
+                            busy: !scanner.busy.isEmpty
+                        ) { plan, groups in
+                            confirming = SmartCleanupConfirmation(plan: plan, groups: groups)
+                        }
+                        if !suggestions.isEmpty {
+                            upToYou(suggestions)
                         }
                     }
                     .padding(20)
@@ -168,6 +155,14 @@ struct SuggestionsView: View {
         }
         // Short content such as an empty state stays under the header instead of floating mid-column.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .confirmationDialog(confirming?.title ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), titleVisibility: .visible, presenting: confirming) { confirmation in
+            Button("Clean Up", role: .destructive) {
+                Task { await scanner.cleanUp(confirmation.plan, groups: confirmation.groups) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { confirmation in
+            Text(confirmation.message)
+        }
         .confirmationDialog("Remove \(pendingLeftovers?.count ?? 0) leftover folders?", isPresented: Binding(get: { pendingLeftovers != nil }, set: { if !$0 { pendingLeftovers = nil } }), titleVisibility: .visible, presenting: pendingLeftovers) { leftovers in
             Button("Remove", role: .destructive) {
                 Task { await scanner.removeLeftovers(leftovers) }
@@ -178,6 +173,399 @@ struct SuggestionsView: View {
         }
     }
 
+    private func subtitle(state: SuggestionsState, plan: SmartCleanupPlan?, suggestions: [CleanupSuggestion]) -> String {
+        guard case .suggestions(let isPartial) = state else { return state.subtitle(total: .zero) }
+        let rest = suggestions.reduce(DiskFootprint.zero) { $0 + $1.footprint }
+        var parts: [String] = []
+        if let plan, !plan.targets.isEmpty { parts.append("\(ByteText.freed(plan.footprint)) can go now") }
+        if rest.allocatedBytes > 0 { parts.append(parts.isEmpty ? "Up to \(ByteText.string(rest.allocatedBytes)) is up to you" : "\(ByteText.string(rest.allocatedBytes)) more is up to you") }
+        let text = parts.joined(separator: ", ")
+        return isPartial ? text + " in what SimCleaner could read" : text
+    }
+
+    private func upToYou(_ suggestions: [CleanupSuggestion]) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Up to you")
+                    .font(.title3.weight(.semibold))
+                Text("These can hold apps, data or files someone still wants, so Smart Cleanup leaves them for you to decide.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(suggestions) { suggestion in
+                SuggestionSection(
+                    suggestion: suggestion,
+                    scanner: scanner,
+                    showDevice: showDevice
+                ) {
+                    switch suggestion.action {
+                    case .erase where scanner.canManageDevices:
+                        onAction(PendingDeviceAction(kind: .erase, devices: suggestion.devices))
+                    case .erase, .delete:
+                        if suggestion.devices.isEmpty {
+                            pendingLeftovers = suggestion.leftovers
+                        } else {
+                            onAction(PendingDeviceAction(kind: .delete, devices: suggestion.devices))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What the Clean Up dialog lists, frozen when the button was pressed.
+struct SmartCleanupConfirmation {
+    let plan: SmartCleanupPlan
+    let groups: Set<SmartCleanupPlan.Group>
+
+    private var targets: [SmartCleanupPlan.Target] {
+        plan.targets.filter { groups.contains($0.group) }
+    }
+
+    var title: String {
+        "Clean up \(ByteText.freed(targets.reduce(.zero) { $0 + $1.footprint }))?"
+    }
+
+    var message: String {
+        let parts = SmartCleanupPlan.Group.allCases.compactMap { group -> String? in
+            let count = targets.filter { $0.group == group }.count
+            return count > 0 ? group.countPhrase(count) : nil
+        }
+        var text = "Removes \(ListFormatter.localizedString(byJoining: parts)). Xcode makes them again when it needs them"
+        if groups.contains(.derivedData) && targets.contains(where: { $0.group == .derivedData }) {
+            text += "; the next build of each project starts from scratch"
+        }
+        return text + ". Anything used since SimCleaner looked stays."
+    }
+}
+
+extension SmartCleanupPlan.Group {
+    var title: String {
+        switch self {
+        case .derivedData: return "DerivedData"
+        case .deviceSupport: return "Older device support"
+        case .toolSimulators: return "Preview and test simulators"
+        case .agentWorkspaces: return "Coding agent workspaces"
+        }
+    }
+
+    func reason(idleDays: Int) -> String {
+        switch self {
+        case .derivedData: return "Projects Xcode hasn't opened for \(idleDays) days. The next build of each starts from scratch."
+        case .deviceSupport: return "Symbols for OS versions your devices have moved on from. Xcode copies them again if one connects."
+        case .toolSimulators: return "Made by Xcode for SwiftUI Previews, tests and playgrounds, and unused for \(idleDays) days."
+        case .agentWorkspaces: return "Build folders agents left and haven't touched for \(idleDays) days."
+        }
+    }
+
+    func countPhrase(_ count: Int) -> String {
+        switch self {
+        case .derivedData: return count == 1 ? "DerivedData of 1 project" : "DerivedData of \(count) projects"
+        case .deviceSupport: return count == 1 ? "1 older device support version" : "\(count) older device support versions"
+        case .toolSimulators: return count == 1 ? "1 Preview or test simulator" : "\(count) Preview and test simulators"
+        case .agentWorkspaces: return count == 1 ? "1 agent workspace" : "\(count) agent workspaces"
+        }
+    }
+
+    /// "3 projects", for the row's size.
+    func itemCount(_ count: Int) -> String {
+        let noun: String
+        switch self {
+        case .derivedData: noun = count == 1 ? "project" : "projects"
+        case .deviceSupport: noun = count == 1 ? "version" : "versions"
+        case .toolSimulators: noun = count == 1 ? "simulator" : "simulators"
+        case .agentWorkspaces: noun = count == 1 ? "workspace" : "workspaces"
+        }
+        return "\(count) \(noun)"
+    }
+
+    var systemImage: String {
+        switch self {
+        case .derivedData: return "hammer"
+        case .deviceSupport: return "cable.connector.horizontal"
+        case .toolSimulators: return "rectangle.on.rectangle"
+        case .agentWorkspaces: return "terminal"
+        }
+    }
+
+    /// The color the storage bar gives the same kind of data.
+    var color: Color {
+        switch self {
+        case .derivedData: return StorageCategory.derivedData.color
+        case .deviceSupport: return StorageCategory.deviceSupport.color
+        case .toolSimulators: return StorageCategory.simulators.color
+        case .agentWorkspaces: return StorageCategory.agentWorkspaces.color
+        }
+    }
+}
+
+/// The summary at the top of Smart Cleanup: how much can go, the groups it comes from, and one button.
+private struct SmartCleanupCard: View {
+    let plan: SmartCleanupPlan?
+    let isPlanning: Bool
+    let isCleaning: Bool
+    /// Preview and test simulators go through Xcode's simulator tools.
+    let canDeleteSimulators: Bool
+    let result: SmartCleanupResult?
+    let idleDays: Int
+    @Binding var selectedGroups: Set<SmartCleanupPlan.Group>
+    @Binding var expandedGroups: Set<SmartCleanupPlan.Group>
+    let busy: Bool
+    let onCleanUp: (SmartCleanupPlan, Set<SmartCleanupPlan.Group>) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var groups: [SmartCleanupPlan.Group] {
+        SmartCleanupPlan.Group.allCases.filter { group in
+            guard let plan, !plan.targets(in: group).isEmpty else { return false }
+            return group != .toolSimulators || canDeleteSimulators
+        }
+    }
+
+    private var chosen: Set<SmartCleanupPlan.Group> { selectedGroups.intersection(groups) }
+
+    private var chosenFootprint: DiskFootprint {
+        plan?.targets.filter { chosen.contains($0.group) }.reduce(.zero) { $0 + $1.footprint } ?? .zero
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 14) {
+                Image(systemName: groups.isEmpty && !isPlanning ? "checkmark.seal" : "sparkles")
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(.tint.opacity(0.12)))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(headline)
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText(value: Double(chosenFootprint.allocatedBytes)))
+                        .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: chosenFootprint.allocatedBytes)
+                    Text(explanation)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                if !groups.isEmpty, let plan {
+                    Button {
+                        onCleanUp(plan, chosen)
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isCleaning {
+                                ProgressView().controlSize(.small)
+                            }
+                            Text(isCleaning ? "Cleaning Up…" : "Clean Up…")
+                        }
+                        .frame(minWidth: 110)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(chosen.isEmpty || isCleaning || busy)
+                }
+            }
+
+            if let result {
+                SmartCleanupResultRow(result: result)
+                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition(.blurReplace))
+            }
+
+            if isPlanning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking at Xcode's folders…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else if !groups.isEmpty, let plan {
+                VStack(spacing: 0) {
+                    ForEach(groups) { group in
+                        if group != groups.first { Divider().padding(.leading, 46) }
+                        groupRow(group, targets: plan.targets(in: group))
+                    }
+                }
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.background))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator))
+            }
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.gray.opacity(0.06)))
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: result)
+    }
+
+    private var headline: String {
+        if isPlanning { return "Smart Cleanup" }
+        if groups.isEmpty { return "Nothing can go on its own" }
+        if chosen.isEmpty { return "Nothing selected" }
+        return "\(ByteText.freed(chosenFootprint)) can go now"
+    }
+
+    private var explanation: String {
+        if isPlanning { return "SimCleaner is checking when each item was last used." }
+        if groups.isEmpty { return "Everything Xcode would make again by itself was used in the last \(idleDays) days." }
+        return "Xcode makes all of it again when it's needed, and none of it was used in the last \(idleDays) days."
+    }
+
+    private func groupRow(_ group: SmartCleanupPlan.Group, targets: [SmartCleanupPlan.Target]) -> some View {
+        let expanded = expandedGroups.contains(group)
+        let footprint = targets.reduce(DiskFootprint.zero) { $0 + $1.footprint }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Toggle(isOn: Binding(
+                    get: { selectedGroups.contains(group) },
+                    set: { on in if on { selectedGroups.insert(group) } else { selectedGroups.remove(group) } }
+                )) {
+                    EmptyView()
+                }
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .accessibilityLabel(group.title)
+                .disabled(isCleaning)
+                Image(systemName: group.systemImage)
+                    .foregroundStyle(group.color)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.title)
+                        .font(.body.weight(.medium))
+                    Text(group.reason(idleDays: idleDays))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(ByteText.freed(footprint))
+                        .font(.callout.weight(.semibold))
+                        .monospacedDigit()
+                    Text(group.itemCount(targets.count))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button {
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
+                        if expanded { expandedGroups.remove(group) } else { expandedGroups.insert(group) }
+                    }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .help(expanded ? "Hide the items" : "Show the items")
+                .accessibilityLabel(expanded ? "Hide the \(targets.count) items" : "Show the \(targets.count) items")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            if expanded {
+                VStack(spacing: 4) {
+                    ForEach(targets) { target in
+                        SmartCleanupItemRow(target: target)
+                    }
+                }
+                .padding(.leading, 46)
+                .padding(.trailing, 12)
+                .padding(.bottom, 10)
+            }
+        }
+    }
+}
+
+private struct SmartCleanupItemRow: View {
+    let target: SmartCleanupPlan.Target
+
+    private var detail: String? {
+        switch target.item {
+        case .folder(let folder): return folder.detail
+        case .simulator(let device): return [device.setKind.badge, device.runtime].compactMap { $0 }.joined(separator: " · ")
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(target.name)
+                    .font(.callout)
+                    .lineLimit(1)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 8)
+            Text("Last used \(target.lastActivity.relativeDescription.lowercasedFirst)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(ByteText.string(target.footprint.allocatedBytes))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(minWidth: 64, alignment: .trailing)
+            Button {
+                SimulatorLauncher.reveal(target.url)
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .buttonStyle(.borderless)
+            .help("Reveal in Finder")
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 10)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.gray.opacity(0.06)))
+    }
+}
+
+/// What the last Smart Cleanup did, under the headline until the next one.
+private struct SmartCleanupResultRow: View {
+    let result: SmartCleanupResult
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var headline: String {
+        if result.freedBytes > 0 { return "Freed about \(ByteText.string(result.freedBytes))" }
+        return result.failures.isEmpty ? "Nothing was removed" : "Nothing could be removed"
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: result.freedBytes > 0 ? "checkmark.circle.fill" : "info.circle")
+                .foregroundStyle(result.freedBytes > 0 ? Color.green : Color.secondary)
+                .symbolEffect(.bounce, value: reduceMotion ? 0 : result.freedBytes)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(headline)
+                    .font(.callout.weight(.semibold))
+                if !result.skipped.isEmpty {
+                    Text(result.skipped.count == 1
+                        ? "1 item was used or changed since SimCleaner looked, so it stayed."
+                        : "\(result.skipped.count) items were used or changed since SimCleaner looked, so they stayed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help(result.skipped.joined(separator: "\n"))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill((result.freedBytes > 0 ? Color.green : Color.gray).opacity(0.08)))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private extension String {
+    /// "2 weeks ago" from "2 weeks ago", "just now" from "Just now".
+    var lowercasedFirst: String {
+        guard let first else { return self }
+        return first.lowercased() + dropFirst()
+    }
 }
 
 private struct SuggestionSection: View {
@@ -552,6 +940,8 @@ struct CleanupDetailView: View {
             VStack(alignment: .leading, spacing: 14) {
                 switch page {
                 case .suggestions:
+                    section("What Smart Cleanup picks", "Only what Xcode makes again by itself: DerivedData of projects you haven't opened, symbols for OS versions your devices have moved on from, simulators Xcode created for previews and tests, and the build folders coding agents leave. And only once nothing has used them for the period you choose. If SimCleaner can't read when something was last used, it never picks it.")
+                    section("Checked again before it goes", "Right before removing an item, SimCleaner reads it again. Anything opened, rebuilt or replaced since it looked stays where it is, and a simulator goes only while it's shut down.")
                     section("Erase or delete?", "Erasing removes a simulator's apps, data and settings and keeps it in Xcode and Device Hub, as fresh as when it was created. Deleting removes it everywhere; create it again in Device Hub if you need it.")
                     section("Why sizes are ranges", "Simulators share files through APFS clones: installing the same build in several simulators doesn't copy it. Those shared blocks are freed only when nothing uses them anymore, so SimCleaner shows the least and the most a cleanup frees.")
                 case .xcodeCaches:

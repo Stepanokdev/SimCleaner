@@ -266,7 +266,6 @@ struct SimulatorListView: View {
             }
             .width(appsColumnWidth)
         }
-        .safeAreaPadding(EdgeInsets(top: 0, leading: 0, bottom: 100, trailing: 0))
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .focused($isListFocused)
     }

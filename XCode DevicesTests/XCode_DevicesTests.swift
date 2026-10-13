@@ -364,11 +364,12 @@ struct PageLayoutTests {
         session.add(5 * gigabyte)
         // The storage bar sits under every page; measure it with everything it can show.
         let bar = minimumHeight(of: StoragePanel(scanner: scanner, session: session, onSelect: { _ in }, onRequestAccess: {}))
-        #expect(bar < 110, "The storage bar needs \(bar) pt")
-        let room = windowMinimumHeight - toolbarHeight - bar
+        // Every column keeps this much free at its bottom; the panel has to fit in it.
+        #expect(bar < StoragePanel.clearance, "The storage bar needs \(bar) pt of the \(StoragePanel.clearance) pt the columns leave it")
+        let room = windowMinimumHeight - toolbarHeight - StoragePanel.clearance
         let pages: [(String, AnyView)] = [
             ("Simulators", AnyView(SimulatorListView(scanner: scanner, devices: [], totalCount: 0, searchText: .constant(""), selection: .constant([]), sortOrder: .constant([]), runtimeFilter: nil, onSelectAll: {}, onRequestAccess: {}))),
-            ("Suggestions", AnyView(SuggestionsView(scanner: scanner, idleDays: .constant(14), onAction: { _ in }, showDevice: { _ in }))),
+            ("Smart Cleanup", AnyView(SmartCleanupView(scanner: scanner, idleDays: .constant(14), onAction: { _ in }, showDevice: { _ in }))),
             ("Xcode caches", AnyView(XcodeCachesView(scanner: scanner, category: .constant(.derivedData)))),
             ("Runtimes", AnyView(RuntimesView(scanner: scanner))),
             ("Suggestions detail", AnyView(CleanupDetailView(scanner: scanner, page: .suggestions))),
@@ -417,6 +418,9 @@ struct SandboxedSimctlTests {
         #expect(!devices.isEmpty)
         // The sandbox hides runtimes from CoreSimulator's disk image service.
         await #expect(throws: SimctlError.self) { _ = try await client.listRuntimeImages() }
+        // ...so simctl calls every simulator unavailable, which is why the App Store edition doesn't take
+        // its availability (DeviceScanner.mergeLiveState). If this ever stops failing, Apple fixed it.
+        #expect(devices.allSatisfy { $0.isAvailable == false })
     }
 }
 
@@ -1000,5 +1004,241 @@ struct FeedbackTests {
         let link = credits.attribute(.link, at: range.location, effectiveRange: nil) as? URL
         #expect(link?.scheme == "mailto")
         #expect(link.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.path } == Feedback.address)
+    }
+}
+
+/// Answers `simctl list` the way CoreSimulator answers the App Store build: every simulator is there, and
+/// every one is "unavailable" because the sandbox hides the runtimes.
+private struct RuntimeBlindSimctl: CommandRunning {
+    let udids: [String]
+
+    func run(_ executable: URL, arguments: [String], environment: [String: String]?, standardInput: Data?, timeout: TimeInterval) async throws -> CommandResult {
+        guard arguments.contains("list") else { return CommandResult(status: 0, stdout: Data(), stderr: Data()) }
+        let devices: [[String: Any]] = udids.map {
+            ["udid": $0, "name": "iPhone", "state": "Booted", "isAvailable": false,
+             "availabilityError": "runtime profile not found using \u{201C}System\u{201D} match policy"]
+        }
+        let json = try JSONSerialization.data(withJSONObject: ["devices": ["com.apple.CoreSimulator.SimRuntime.iOS-27-0": devices]])
+        return CommandResult(status: 0, stdout: json, stderr: Data())
+    }
+}
+
+struct AvailabilityTests {
+    private func scan(_ fixture: Fixture) throws -> (ScanResult, SimctlClient) {
+        let root = fixture.url("Library/Developer")
+        _ = try fixture.addDevice(in: "Library/Developer/CoreSimulator/Devices", name: "Used today")
+        _ = try fixture.addDevice(in: "Library/Developer/CoreSimulator/Devices", name: "Used last month")
+        let result = try SimulatorScanner.loadDevices(at: root)
+        let tool = SimctlTool(executable: URL(fileURLWithPath: "/usr/bin/xcrun"), leadingArguments: ["simctl"], developerDirectory: nil, source: .xcrun)
+        return (result, SimctlClient(tool: tool, runner: RuntimeBlindSimctl(udids: result.devices.map(\.udid))))
+    }
+
+    @Test func inTheSandboxSimctlsUnavailableIsNotTakenAtItsWord() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let (result, simctl) = try scan(fixture)
+
+        let merged = await DeviceScanner.mergeLiveState(into: result, using: simctl, seesRuntimes: false)
+        #expect(merged.devices.count == 2)
+        #expect(merged.devices.allSatisfy { $0.isAvailable == nil && $0.availabilityError == nil })
+        // The running state still comes from CoreSimulator.
+        #expect(merged.devices.allSatisfy { $0.state == .booted })
+        let suggestions = CleanupAdvisor.suggestions(for: merged, idleDays: 14, deviceHubInstalled: true)
+        #expect(!suggestions.contains { $0.kind == .unavailable })
+    }
+
+    @Test func outsideTheSandboxUnavailableSimulatorsAreSuggested() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let (result, simctl) = try scan(fixture)
+
+        let merged = await DeviceScanner.mergeLiveState(into: result, using: simctl, seesRuntimes: true)
+        #expect(merged.devices.allSatisfy { $0.isAvailable == false && $0.availabilityError?.contains("runtime profile not found") == true })
+        let suggestions = CleanupAdvisor.suggestions(for: merged, idleDays: 14, deviceHubInstalled: true)
+        #expect(suggestions.first { $0.kind == .unavailable }?.devices.count == 2)
+    }
+}
+
+/// Answers simctl for simulators in Xcode's own sets: lists each as shut down or booted, and deletes one by
+/// removing its folder, as CoreSimulator does.
+private final class ToolSetSimctl: CommandRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var folders: [String: URL]
+    private var states: [String: String]
+    private var log: [String] = []
+
+    init(folders: [String: URL]) {
+        self.folders = folders
+        states = folders.mapValues { _ in "Shutdown" }
+    }
+
+    var commands: [String] { lock.withLock { log } }
+
+    func setState(_ state: String, of udid: String) { lock.withLock { states[udid] = state } }
+
+    func run(_ executable: URL, arguments: [String], environment: [String: String]?, standardInput: Data?, timeout: TimeInterval) async throws -> CommandResult {
+        let command = arguments.first { ["list", "delete", "shutdown", "erase"].contains($0) } ?? ""
+        return try lock.withLock {
+            log.append(command)
+            switch command {
+            case "list":
+                let devices: [[String: Any]] = folders.keys.map { ["udid": $0, "name": "Preview iPhone", "state": states[$0] ?? "Shutdown", "isAvailable": true] }
+                let json = try JSONSerialization.data(withJSONObject: ["devices": ["com.apple.CoreSimulator.SimRuntime.iOS-27-0": devices]])
+                return CommandResult(status: 0, stdout: json, stderr: Data())
+            case "delete":
+                if let udid = arguments.last, let folder = folders.removeValue(forKey: udid) {
+                    try FileManager.default.removeItem(at: folder)
+                }
+            default:
+                break
+            }
+            return CommandResult(status: 0, stdout: Data(), stderr: Data())
+        }
+    }
+}
+
+@MainActor
+struct SmartCleanupRunTests {
+    private let previews = "Library/Developer/Xcode/UserData/Previews/Simulator Devices"
+    private let old = Date().addingTimeInterval(-40 * 86_400)
+
+    /// A project Xcode last opened 40 days ago and a Preview simulator last used then, scanned and planned.
+    private func planned(_ fixture: Fixture, session: CleanupSession) async throws -> (DeviceScanner, ToolSetSimctl, project: URL, simulator: URL) {
+        let developer = fixture.url("Library/Developer")
+        let project = developer.appending(path: "Xcode/DerivedData/Tidepool-abcdefghijklmnopqrstuvwxyz", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: project.appending(path: "Build"), withIntermediateDirectories: true)
+        try Data(repeating: 7, count: 2_000_000).write(to: project.appending(path: "Build/app.o"))
+        (["LastAccessedDate": old, "WorkspacePath": "/Users/dev/Tidepool/Tidepool.xcodeproj"] as NSDictionary).write(to: project.appending(path: "info.plist"), atomically: true)
+
+        let simulator = try fixture.addDevice(in: previews, name: "Preview iPhone")
+        let plist = simulator.appending(path: "device.plist")
+        var values = try #require(NSDictionary(contentsOf: plist) as? [String: Any])
+        values["lastUsedAt"] = old
+        try PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0).write(to: plist)
+        try Data(repeating: 8, count: 1_000_000).write(to: simulator.appending(path: "data/preview-data.bin"))
+
+        let udid = try #require(values["UDID"] as? String)
+        let simctl = ToolSetSimctl(folders: [udid: simulator])
+        let tool = SimctlTool(executable: URL(fileURLWithPath: "/usr/bin/xcrun"), leadingArguments: ["simctl"], developerDirectory: nil, source: .xcrun)
+        let scanner = DeviceScanner(devicesURL: developer, sandboxed: false, runner: simctl, capabilities: Capabilities(isSandboxed: false, simctl: .success(tool), coreSimulatorInstalled: true), developerFolder: developer, restoresBookmark: false, cleanupSession: session)
+        scanner.smartIdleDays = 30
+        scanner.refresh()
+        scanner.refreshDeveloperStorage(force: true)
+        try await waitUntil { !scanner.isLoading && scanner.hasScannedDeveloperStorage && !scanner.isScanningDeveloperStorage && scanner.smartPlan?.targets.count == 2 }
+        return (scanner, simctl, project, simulator)
+    }
+
+    @Test func itRemovesWhatItPlannedAndCountsItAsOneCleanup() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let harness = SessionHarness()
+        let session = harness.makeSession()
+        let (scanner, simctl, project, simulator) = try await planned(fixture, session: session)
+        let plan = try #require(scanner.smartPlan)
+
+        let result = await scanner.cleanUp(plan, groups: Set(SmartCleanupPlan.Group.allCases))
+
+        #expect(result.removed == 2)
+        #expect(result.skipped.isEmpty && result.failures.isEmpty)
+        #expect(result.freedBytes >= 3_000_000)
+        #expect(!FileManager.default.fileExists(atPath: project.path))
+        #expect(!FileManager.default.fileExists(atPath: simulator.path))
+        // One Clean Up, one increment in the "Freed about" total.
+        #expect(session.cleanupsThisLaunch == 1)
+        #expect(session.totals?.freedBytes == result.freedBytes)
+        #expect(scanner.report == nil)
+        // A shut-down simulator is deleted as it is; Smart Cleanup never stops one.
+        #expect(simctl.commands.contains("delete"))
+        #expect(!simctl.commands.contains("shutdown"))
+    }
+
+    @Test func whateverCameIntoUseSinceThePlanStays() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let session = SessionHarness().makeSession()
+        let (scanner, simctl, project, simulator) = try await planned(fixture, session: session)
+        let plan = try #require(scanner.smartPlan)
+
+        // Xcode opened the project, and a preview started, after the plan was made.
+        (["LastAccessedDate": Date(), "WorkspacePath": "/Users/dev/Tidepool/Tidepool.xcodeproj"] as NSDictionary).write(to: project.appending(path: "info.plist"), atomically: true)
+        let udid = try #require(SimulatorScanner.readUDID(inDeviceFolder: simulator))
+        simctl.setState("Booted", of: udid)
+
+        let result = await scanner.cleanUp(plan, groups: Set(SmartCleanupPlan.Group.allCases))
+
+        #expect(result.removed == 0)
+        // Both stay, each with its reason; neither is a failure.
+        #expect(result.skipped.count == 2)
+        #expect(result.skipped.contains { $0.hasPrefix("Tidepool") && $0.contains("used since") })
+        #expect(result.skipped.contains { $0.hasPrefix("Preview iPhone") && $0.contains("running") })
+        #expect(result.failures.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: project.path))
+        #expect(FileManager.default.fileExists(atPath: simulator.path))
+        #expect(!simctl.commands.contains("delete"))
+        #expect(!simctl.commands.contains("shutdown"))
+        #expect(session.totals == nil)
+        #expect(scanner.report == nil)
+    }
+
+    @Test func anUncheckedGroupIsLeftAlone() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let session = SessionHarness().makeSession()
+        let (scanner, _, project, simulator) = try await planned(fixture, session: session)
+        let plan = try #require(scanner.smartPlan)
+
+        let result = await scanner.cleanUp(plan, groups: [.derivedData])
+
+        #expect(result.removed == 1)
+        #expect(!FileManager.default.fileExists(atPath: project.path))
+        #expect(FileManager.default.fileExists(atPath: simulator.path))
+    }
+}
+
+/// The storage panel sits over the bottom of every column, so each page's lists have to end above it.
+@MainActor
+struct StoragePanelClearanceTests {
+    /// How far above the window's bottom edge each scroll view on `page` stops showing content, laid out the
+    /// way a column shows it: its own bottom edge plus the inset AppKit keeps free at the end of the content.
+    private func visibleBottoms(of page: some View) -> [CGFloat] {
+        // As ContentView builds a column: the page fills it, and the clearance comes from outside.
+        let host = NSHostingView(rootView: page.frame(maxWidth: .infinity, maxHeight: .infinity).clearsStoragePanel())
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        host.frame = NSRect(x: 0, y: 0, width: 760, height: 520)
+        host.layoutSubtreeIfNeeded()
+        func scrollViews(in view: NSView) -> [NSScrollView] {
+            ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews)
+        }
+        return scrollViews(in: host).map { $0.convert($0.bounds, to: nil).minY + $0.contentInsets.bottom }
+    }
+
+    @Test func everyListAndScrollViewEndsAboveTheStoragePanel() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let developer = fixture.url("Library/Developer")
+        try fixture.addDevice(in: "Library/Developer/CoreSimulator/Devices", name: "iPhone")
+        let project = developer.appending(path: "Xcode/DerivedData/Tidepool-abcdefghijklmnopqrstuvwxyz", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 10_000).write(to: project.appending(path: "build.o"))
+        let scanner = DeviceScanner(devicesURL: developer, sandboxed: true, capabilities: filesOnly, developerFolder: developer, restoresBookmark: false)
+        scanner.refresh()
+        scanner.refreshDeveloperStorage(force: true)
+        try await waitUntil { !scanner.isLoading && scanner.hasScannedDeveloperStorage && !scanner.isScanningDeveloperStorage }
+        let device = try #require(scanner.devices.first)
+
+        let pages: [(String, AnyView)] = [
+            ("Simulators", AnyView(SimulatorListView(scanner: scanner, devices: scanner.devices, totalCount: 1, searchText: .constant(""), selection: .constant([]), sortOrder: .constant([]), runtimeFilter: nil, onSelectAll: {}, onRequestAccess: {}))),
+            ("Smart Cleanup", AnyView(SmartCleanupView(scanner: scanner, idleDays: .constant(14), onAction: { _ in }, showDevice: { _ in }))),
+            ("Xcode caches", AnyView(XcodeCachesView(scanner: scanner, category: .constant(.derivedData)))),
+            ("Simulator detail", AnyView(DeviceDetailView(scanner: scanner, device: device, onDelete: {}, onErase: {}, onUninstall: { _ in }, onDuplicate: {}, onRename: {}, onInstall: {}))),
+            ("Several simulators", AnyView(MultiSelectionPanel(scanner: scanner, devices: [device, device], onDelete: {}, onErase: {}, onShutDown: {}, onInstall: {}))),
+            ("Smart Cleanup detail", AnyView(CleanupDetailView(scanner: scanner, page: .suggestions))),
+        ]
+        for (name, page) in pages {
+            let bottoms = visibleBottoms(of: page)
+            #expect(!bottoms.isEmpty, "\(name) has no scroll view")
+            #expect(bottoms.allSatisfy { $0 >= StoragePanel.clearance }, "\(name) shows content down to \(bottoms) pt above the window's bottom, under the storage panel")
+        }
     }
 }

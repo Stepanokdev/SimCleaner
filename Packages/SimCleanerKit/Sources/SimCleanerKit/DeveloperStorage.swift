@@ -133,7 +133,8 @@ public enum DeveloperStorageScanner {
             case .success(let folders):
                 items += folders.map { folder in
                     let modified = folder.contentModificationDate
-                    let isStale = modified.map { now.timeIntervalSince($0) > staleAgentWorkspaceAge } ?? true
+                    // A workspace whose date can't be read hasn't been shown to be stale.
+                    let isStale = modified.map { now.timeIntervalSince($0) > staleAgentWorkspaceAge } ?? false
                     return DeveloperStorageItem(
                         category: .agentWorkspaces,
                         url: folder,

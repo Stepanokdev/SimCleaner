@@ -9,6 +9,9 @@ import SwiftUI
 /// The bar under every page: what each kind of Xcode data takes next to the space still available, and
 /// what this session has freed. Clicking a category opens the page that cleans it.
 struct StoragePanel: View {
+    /// How much room every column leaves at its bottom for this panel, which sits over all of them.
+    static let clearance: CGFloat = 100
+
     @ObservedObject var scanner: DeviceScanner
     @ObservedObject var session: CleanupSession
     let onSelect: (StorageCategory) -> Void
@@ -96,5 +99,13 @@ extension DeviceScanner {
             simulatorCaches: canReadSimulatorCaches ? dyldCaches : nil,
             volume: volume
         )
+    }
+}
+
+extension View {
+    /// Ends every list and scroll view in a column 100 points above the window's bottom edge, so the last
+    /// row and any button after it stay clear of the storage panel.
+    func clearsStoragePanel() -> some View {
+        safeAreaPadding(.bottom, StoragePanel.clearance)
     }
 }

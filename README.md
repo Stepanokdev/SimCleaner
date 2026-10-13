@@ -28,15 +28,16 @@ Simulators pile up. Every Xcode release adds a new batch, test runs clone device
 - Cleanups add up in a "Freed about" total next to the bar: an estimate that counts only what is gone from disk, each item by the bytes it held alone where APFS can tell. It starts again an hour after your last cleanup.
 - You see when you last used each simulator. Devices Xcode created but never booted say "Never launched".
 - The apps inside each simulator are listed with how much space each app and its data take, and you can open an app's Documents, Caches or Preferences folder in Finder.
-- Suggestions point out simulators you haven't used for a few weeks, ones that can't run because their runtime is gone, and folders no simulator owns.
+- Smart Cleanup removes in one click what Xcode makes again by itself and nobody used for the period you pick: DerivedData of projects you haven't opened, device support for OS versions your devices have moved on from, Preview and test simulators, and old agent workspaces. A date SimCleaner can't read never counts as old, and each item is checked again right before it goes.
+- Simulators you test in stay suggestions you act on yourself: ones you haven't used for a few weeks, ones that can't run because their runtime is gone, and folders no simulator owns.
 - Xcode caches get their own page: DerivedData, device support files, and the build folders coding agents leave behind through XcodeBuildMCP or MobileBuildMCP.
 - Deleting, erasing, shutting down, duplicating and renaming go through Xcode's own `simctl`, so Xcode and Device Hub see the change right away. SimCleaner asks before anything destructive.
 - One build can go onto several simulators at once.
 - Any simulator opens in Device Hub (Xcode 27) or Simulator, and you can reveal its folder in Finder.
 
-| Simulators | Suggestions | Xcode caches |
+| Simulators | Smart Cleanup | Xcode caches |
 | --- | --- | --- |
-| ![Simulators and the storage bar](docs/screenshots/overview.jpg) | ![Cleanup suggestions](docs/screenshots/suggestions.jpg) | ![DerivedData per project](docs/screenshots/xcode-caches.jpg) |
+| ![Simulators and the storage bar](docs/screenshots/overview.jpg) | ![Smart Cleanup with what can go now](docs/screenshots/smart-cleanup.jpg) | ![DerivedData per project](docs/screenshots/xcode-caches.jpg) |
 
 <sub>Screenshots use sample projects.</sub>
 
@@ -53,7 +54,7 @@ Every app in the Mac App Store runs in the sandbox. Inside it, macOS keeps the a
 | Install and updates | Mac App Store | DMG from [Releases](https://github.com/Stepanokdev/SimCleaner/releases), then updates itself |
 | Simulators, sizes, apps, last use | ✓ | ✓ |
 | Delete, erase, shut down, duplicate, rename | ✓ | ✓ |
-| Cleanup suggestions | ✓ | ✓ |
+| Smart Cleanup and suggestions | ✓ | ✓ |
 | DerivedData, device support files, agent workspaces | ✓ | ✓, and marks DerivedData whose project is gone |
 | Start a simulator | Opens it in Device Hub or Simulator | Starts it, then opens it |
 | Remove an app from a simulator | Running simulators | Starts the simulator for a moment |

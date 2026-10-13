@@ -35,6 +35,15 @@ public struct CleanupSuggestion: Identifiable, Sendable {
     public var footprint: DiskFootprint {
         devices.reduce(.zero) { $0 + $1.footprint } + leftovers.reduce(.zero) { $0 + $1.footprint }
     }
+
+    /// The same suggestion without the items in `ids`, which something else already takes care of, or nil
+    /// when nothing is left of it.
+    public func excluding(_ ids: Set<String>) -> CleanupSuggestion? {
+        let devices = devices.filter { !ids.contains($0.id) }
+        let leftovers = leftovers.filter { !ids.contains($0.id) }
+        guard !devices.isEmpty || !leftovers.isEmpty else { return nil }
+        return CleanupSuggestion(kind: kind, title: title, detail: detail, devices: devices, leftovers: leftovers, action: action)
+    }
 }
 
 public enum CleanupAdvisor {
@@ -46,10 +55,14 @@ public enum CleanupAdvisor {
         let cutoff = now.addingTimeInterval(-Double(idleDays) * 86_400)
 
         let idle = scan.devices.filter { device in
+            // Preview, test and playground devices are Smart Cleanup's; erasing them would only make Xcode's
+            // next preview or test slower.
+            guard device.setKind == .simulators else { return false }
             guard !device.state.isRunning, device.hasBootedBefore, device.isAvailable != false else { return false }
             guard device.footprint.exclusiveBytes >= minimumIdleFootprint else { return false }
+            // A simulator whose last use can't be read hasn't been shown to be idle.
             let lastActivity = device.lastUsedAt ?? device.lastModifiedAt
-            return lastActivity.map { $0 < cutoff } ?? true
+            return lastActivity.map { $0 < cutoff } ?? false
         }
         if !idle.isEmpty {
             suggestions.append(CleanupSuggestion(
