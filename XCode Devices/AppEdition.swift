@@ -3,7 +3,7 @@
 //  XCode Devices
 //
 //  The App Store build and the Pro build compile the same windows. Each edition folder defines
-//  `AppEdition.current`, `EditionToolbarButton` and `EditionHooks` for its own build.
+//  `AppEdition.current`, `EditionToolbarButton`, `EditionCommands` and `EditionHooks` for its own build.
 
 import Foundation
 

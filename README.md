@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://simcleaner.com">simcleaner.com</a> ·
   <a href="https://apps.apple.com/us/app/simcleaner-for-xcode/id6755651521">Mac App Store</a> ·
   <a href="#two-editions">SimCleaner Pro</a> ·
   <a href="#build-from-source">Build from source</a> ·
@@ -49,7 +50,7 @@ Every app in the Mac App Store runs in the sandbox. Inside it, macOS keeps the a
 | --- | --- | --- |
 | Price | Free | Free |
 | Requires | macOS 15.6 or later | macOS 27 and Xcode 27 |
-| Install and updates | Mac App Store | DMG from [Releases](https://github.com/Stepanokdev/SimCleaner/releases) |
+| Install and updates | Mac App Store | DMG from [Releases](https://github.com/Stepanokdev/SimCleaner/releases), then updates itself |
 | Simulators, sizes, apps, last use | ✓ | ✓ |
 | Delete, erase, shut down, duplicate, rename | ✓ | ✓ |
 | Cleanup suggestions | ✓ | ✓ |
@@ -118,7 +119,7 @@ Version 1.2 fixes what broke with the 2026 releases:
 
 ## Privacy
 
-Neither edition collects analytics or talks to a server of its own. The App Store edition runs in the App Sandbox without network access; its optional tip jar goes through Apple's StoreKit. Pro runs outside the sandbox so it can start simulators and delete runtimes, and it makes no network requests either. Both delete only what you select: simulators and runtimes through Xcode's `simctl`, cache folders only inside `~/Library/Developer`. If `simctl` can't be used (Xcode missing, the license not accepted, a timeout), SimCleaner doesn't delete simulators at all while CoreSimulator is on the Mac, because something may still be using them.
+Neither edition collects analytics or talks to a server of its own. The App Store edition runs in the App Sandbox without network access; its optional tip jar goes through Apple's StoreKit. Pro runs outside the sandbox so it can start simulators and delete runtimes. Its one network request is the update check: once a day [Sparkle](https://sparkle-project.org) reads `https://simcleaner.com/updates/appcast.xml`, and it installs an update only if the download and the feed are both signed with SimCleaner's key. *Check for Updates Automatically* in the SimCleaner Pro menu turns the check off. Both delete only what you select: simulators and runtimes through Xcode's `simctl`, cache folders only inside `~/Library/Developer`. If `simctl` can't be used (Xcode missing, the license not accepted, a timeout), SimCleaner doesn't delete simulators at all while CoreSimulator is on the Mac, because something may still be using them.
 
 ## Build from source
 
@@ -148,15 +149,15 @@ The tests build throwaway `~/Library/Developer`-shaped folders on disk and talk 
 | `Packages/SimCleanerKit` | Everything that isn't UI: finding simulators, APFS-aware sizes, `simctl`, cleanup rules, Xcode caches, runtimes, installs. Both editions and the CLI use it. |
 | `XCode Devices/` | The window both editions share: sidebar, simulator table, details, cleanup pages, install sheet |
 | `Editions/AppStore/` | What only the App Store edition has: sandbox entitlements, tip jar, rating prompt |
-| `Editions/Pro/` | What only Pro has: its entitlements and the command line tool sheet |
+| `Editions/Pro/` | What only Pro has: its entitlements, the command line tool sheet and Sparkle updates |
 | `CLI/` | The `simcleaner` command line tool |
 | `XCode DevicesTests/` | Tests for the app's view model and page layout |
 
-Each edition folder defines the same few symbols (`AppEdition.current`, `EditionToolbarButton`, `EditionHooks`), so the shared code has no `#if`. Features that depend on the sandbox check `Capabilities` at runtime instead.
+Each edition folder defines the same few symbols (`AppEdition.current`, `EditionToolbarButton`, `EditionCommands`, `EditionHooks`), so the shared code has no `#if`. Features that depend on the sandbox check `Capabilities` at runtime instead.
 
 ## Contributing
 
-Bug reports and pull requests are welcome. If simulators are missing or dates look wrong, please mention your macOS and Xcode versions. The output of `xcrun simctl list devices -j` helps a lot.
+Bug reports and pull requests are welcome, here or by email to stepanokdev@gmail.com. In the app, **Help › Send Feedback** starts that email with the app and macOS versions already filled in. If simulators are missing or dates look wrong, please add your Xcode version. The output of `xcrun simctl list devices -j` helps a lot.
 
 ## License
 

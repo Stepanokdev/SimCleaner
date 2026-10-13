@@ -30,6 +30,11 @@ struct EditionToolbarButton: View {
 
 @MainActor
 enum EditionHooks {
+    /// Starts Sparkle, whose schedule runs from launch.
+    static func launched() {
+        _ = Updater.shared
+    }
+
     static func cleanupSucceeded() {}
 }
 

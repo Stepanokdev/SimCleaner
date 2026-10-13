@@ -15,7 +15,7 @@ struct SimCleanerCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "simcleaner",
         abstract: "See and clean up Xcode simulators, runtimes and caches.",
-        discussion: "Destructive commands print what they would do and stop unless you pass --yes. Add --json to any listing for scripts and coding agents.",
+        discussion: "Destructive commands print what they would do and stop unless you pass --yes. Add --json to any listing for scripts and coding agents. Feedback and bug reports: stepanokdev@gmail.com",
         version: "1.0",
         subcommands: [Storage.self, List.self, Suggest.self, Runtimes.self, Caches.self, Shutdown.self, Erase.self, Delete.self, Install.self],
         defaultSubcommand: Storage.self

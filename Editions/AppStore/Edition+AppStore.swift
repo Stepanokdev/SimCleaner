@@ -27,8 +27,17 @@ struct EditionToolbarButton: View {
     }
 }
 
+/// The App Store edition adds nothing to the menus: the App Store updates it.
+struct EditionCommands: Commands {
+    var body: some Commands {
+        EmptyCommands()
+    }
+}
+
 @MainActor
 enum EditionHooks {
+    static func launched() {}
+
     /// After a cleanup that worked, the App Store build may ask for a rating.
     static func cleanupSucceeded() {
         RatingManager.shared.recordSuccessfulDeletion()

@@ -969,3 +969,36 @@ struct CleanupCreditTests {
         #expect(scanner.devices.map(\.name) == ["Stays"])
     }
 }
+
+struct FeedbackTests {
+    @Test func theMessageGoesToTheDeveloperWithWhatItRanOn() throws {
+        let system = OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 1)
+        let url = Feedback.mailURL(edition: "SimCleaner Pro", version: "1.0", build: "7", system: system)
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        #expect(components.scheme == "mailto")
+        #expect(components.path == "stepanokdev@gmail.com")
+        let fields = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        #expect(fields["subject"] == "SimCleaner Pro 1.0 feedback")
+        #expect(fields["body"] == "\r\n\r\nSimCleaner Pro 1.0 (7) on macOS 27.0.1\r\n")
+        // Encoded, so a mail app reads the whole subject and keeps the line breaks.
+        #expect(!url.absoluteString.contains(" "))
+        #expect(url.absoluteString.contains("%0D%0A"))
+    }
+
+    @Test func aMacOSWithoutAPatchVersionIsWrittenShort() throws {
+        let system = OperatingSystemVersion(majorVersion: 15, minorVersion: 6, patchVersion: 0)
+        let url = Feedback.mailURL(edition: "SimCleaner", version: "1.3", build: "6", system: system)
+        let body = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "body" }?.value
+        #expect(body == "\r\n\r\nSimCleaner 1.3 (6) on macOS 15.6\r\n")
+    }
+
+    @MainActor
+    @Test func theAboutPanelShowsTheAddressAsALink() throws {
+        let credits = Feedback.aboutCredits
+        let range = (credits.string as NSString).range(of: Feedback.address)
+        #expect(range.location != NSNotFound)
+        let link = credits.attribute(.link, at: range.location, effectiveRange: nil) as? URL
+        #expect(link?.scheme == "mailto")
+        #expect(link.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.path } == Feedback.address)
+    }
+}
