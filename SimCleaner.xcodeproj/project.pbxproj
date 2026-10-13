@@ -6,6 +6,16 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		5C1EA40000000000000000B5 /* SimCleanerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5C1EA40000000000000000B2 /* SimCleanerKit */; };
+		5C1EA40000000000000000B6 /* SimCleanerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5C1EA40000000000000000B3 /* SimCleanerKit */; };
+		5C1EA40000000000000000B7 /* SimCleanerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5C1EA40000000000000000B4 /* SimCleanerKit */; };
+		5C1EA40000000000000000B9 /* ArgumentParser in Frameworks */ = {isa = PBXBuildFile; productRef = 5C1EA40000000000000000BA /* ArgumentParser */; };
+		5C1EA40000000000000000B8 /* simcleaner in Embed Command Line Tool */ = {isa = PBXBuildFile; fileRef = 5C1EA40000000000000000C2 /* simcleaner */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		5C1EA4000000000000000104 /* Pow in Frameworks */ = {isa = PBXBuildFile; productRef = 5C1EA4000000000000000102 /* Pow */; };
+		5C1EA4000000000000000105 /* Pow in Frameworks */ = {isa = PBXBuildFile; productRef = 5C1EA4000000000000000103 /* Pow */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		CE4DACC82ED1DE2B0042A643 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -21,14 +31,47 @@
 			remoteGlobalIDString = CE4DACB72ED1DE290042A643;
 			remoteInfo = "XCode Devices";
 		};
+		5C1EA40000000000000000F1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CE4DACB02ED1DE290042A643 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5C1EA40000000000000000D2;
+			remoteInfo = SimCleanerCLI;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5C1EA40000000000000000E4 /* Embed Command Line Tool */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				5C1EA40000000000000000B8 /* simcleaner in Embed Command Line Tool */,
+			);
+			name = "Embed Command Line Tool";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		CE4DACB82ED1DE290042A643 /* SimCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SimCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE4DACC72ED1DE2B0042A643 /* SimCleanerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimCleanerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CE4DACD12ED1DE2B0042A643 /* SimCleanerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimCleanerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		CE4DAE002ED1E2E70042A700 /* XCode Devices/XCode Devices.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "XCode Devices/XCode Devices.entitlements"; sourceTree = "<group>"; };
+		CE4DAE002ED1E2E70042A700 /* Editions/AppStore/SimCleaner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Editions/AppStore/SimCleaner.entitlements; sourceTree = "<group>"; };
+		5C1EA40000000000000000C1 /* SimCleaner Pro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SimCleaner Pro.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5C1EA40000000000000000C2 /* simcleaner */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = simcleaner; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5C1EA40000000000000000A4 /* Exceptions for "Editions/AppStore" folder in "SimCleaner" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Products.storekit,
+			);
+			target = CE4DACB72ED1DE290042A643 /* SimCleaner */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		CE4DACBA2ED1DE290042A643 /* XCode Devices */ = {
@@ -46,6 +89,24 @@
 			path = "XCode DevicesUITests";
 			sourceTree = "<group>";
 		};
+		5C1EA40000000000000000A1 /* Editions/AppStore */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5C1EA40000000000000000A4 /* Exceptions for "Editions/AppStore" folder in "SimCleaner" target */,
+			);
+			path = Editions/AppStore;
+			sourceTree = "<group>";
+		};
+		5C1EA40000000000000000A2 /* Editions/Pro */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Editions/Pro;
+			sourceTree = "<group>";
+		};
+		5C1EA40000000000000000A3 /* CLI */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CLI;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,6 +114,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5C1EA40000000000000000B5 /* SimCleanerKit in Frameworks */,
+				5C1EA4000000000000000104 /* Pow in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,6 +133,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5C1EA40000000000000000E2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5C1EA40000000000000000B6 /* SimCleanerKit in Frameworks */,
+				5C1EA4000000000000000105 /* Pow in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5C1EA40000000000000000E6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5C1EA40000000000000000B7 /* SimCleanerKit in Frameworks */,
+				5C1EA40000000000000000B9 /* ArgumentParser in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -77,9 +158,12 @@
 			isa = PBXGroup;
 			children = (
 				CE4DACBA2ED1DE290042A643 /* XCode Devices */,
+				5C1EA40000000000000000A1 /* Editions/AppStore */,
+				5C1EA40000000000000000A2 /* Editions/Pro */,
+				5C1EA40000000000000000A3 /* CLI */,
 				CE4DACCA2ED1DE2B0042A643 /* XCode DevicesTests */,
 				CE4DACD42ED1DE2B0042A643 /* XCode DevicesUITests */,
-				CE4DAE002ED1E2E70042A700 /* XCode Devices/XCode Devices.entitlements */,
+				CE4DAE002ED1E2E70042A700 /* Editions/AppStore/SimCleaner.entitlements */,
 				CE4DACB92ED1DE290042A643 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +174,8 @@
 				CE4DACB82ED1DE290042A643 /* SimCleaner.app */,
 				CE4DACC72ED1DE2B0042A643 /* SimCleanerTests.xctest */,
 				CE4DACD12ED1DE2B0042A643 /* SimCleanerUITests.xctest */,
+				5C1EA40000000000000000C1 /* SimCleaner Pro.app */,
+				5C1EA40000000000000000C2 /* simcleaner */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -111,9 +197,12 @@
 			);
 			fileSystemSynchronizedGroups = (
 				CE4DACBA2ED1DE290042A643 /* XCode Devices */,
+				5C1EA40000000000000000A1 /* Editions/AppStore */,
 			);
 			name = SimCleaner;
 			packageProductDependencies = (
+				5C1EA40000000000000000B2 /* SimCleanerKit */,
+				5C1EA4000000000000000102 /* Pow */,
 			);
 			productName = "XCode Devices";
 			productReference = CE4DACB82ED1DE290042A643 /* SimCleaner.app */;
@@ -165,6 +254,56 @@
 			productReference = CE4DACD12ED1DE2B0042A643 /* SimCleanerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		5C1EA40000000000000000D1 /* SimCleaner Pro */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5C1EA40000000000000000F5 /* Build configuration list for PBXNativeTarget "SimCleaner Pro" */;
+			buildPhases = (
+				5C1EA40000000000000000E1 /* Sources */,
+				5C1EA40000000000000000E2 /* Frameworks */,
+				5C1EA40000000000000000E3 /* Resources */,
+				5C1EA40000000000000000E4 /* Embed Command Line Tool */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5C1EA40000000000000000F2 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CE4DACBA2ED1DE290042A643 /* XCode Devices */,
+				5C1EA40000000000000000A2 /* Editions/Pro */,
+			);
+			name = "SimCleaner Pro";
+			packageProductDependencies = (
+				5C1EA40000000000000000B3 /* SimCleanerKit */,
+				5C1EA4000000000000000103 /* Pow */,
+			);
+			productName = "SimCleaner Pro";
+			productReference = 5C1EA40000000000000000C1 /* SimCleaner Pro.app */;
+			productType = "com.apple.product-type.application";
+		};
+		5C1EA40000000000000000D2 /* SimCleanerCLI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5C1EA40000000000000000F8 /* Build configuration list for PBXNativeTarget "SimCleanerCLI" */;
+			buildPhases = (
+				5C1EA40000000000000000E5 /* Sources */,
+				5C1EA40000000000000000E6 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5C1EA40000000000000000A3 /* CLI */,
+			);
+			name = SimCleanerCLI;
+			packageProductDependencies = (
+				5C1EA40000000000000000B4 /* SimCleanerKit */,
+				5C1EA40000000000000000BA /* ArgumentParser */,
+			);
+			productName = simcleaner;
+			productReference = 5C1EA40000000000000000C2 /* simcleaner */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -186,6 +325,12 @@
 						CreatedOnToolsVersion = 26.1.1;
 						TestTargetID = CE4DACB72ED1DE290042A643;
 					};
+					5C1EA40000000000000000D1 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					5C1EA40000000000000000D2 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = CE4DACB32ED1DE290042A643 /* Build configuration list for PBXProject "SimCleaner" */;
@@ -197,6 +342,11 @@
 			);
 			mainGroup = CE4DACAF2ED1DE290042A643;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5C1EA40000000000000000B1 /* XCLocalSwiftPackageReference "Packages/SimCleanerKit" */,
+				5C1EA40000000000000000BB /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
+				5C1EA4000000000000000101 /* XCRemoteSwiftPackageReference "Pow" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CE4DACB92ED1DE290042A643 /* Products */;
 			projectDirPath = "";
@@ -205,6 +355,8 @@
 				CE4DACB72ED1DE290042A643 /* SimCleaner */,
 				CE4DACC62ED1DE2B0042A643 /* SimCleanerTests */,
 				CE4DACD02ED1DE2B0042A643 /* SimCleanerUITests */,
+				5C1EA40000000000000000D1 /* SimCleaner Pro */,
+				5C1EA40000000000000000D2 /* SimCleanerCLI */,
 			);
 		};
 /* End PBXProject section */
@@ -225,6 +377,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CE4DACCF2ED1DE2B0042A643 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5C1EA40000000000000000E3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -255,6 +414,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5C1EA40000000000000000E1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5C1EA40000000000000000E5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -267,6 +440,11 @@
 			isa = PBXTargetDependency;
 			target = CE4DACB72ED1DE290042A643 /* SimCleaner */;
 			targetProxy = CE4DACD22ED1DE2B0042A643 /* PBXContainerItemProxy */;
+		};
+		5C1EA40000000000000000F2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5C1EA40000000000000000D2 /* SimCleanerCLI */;
+			targetProxy = 5C1EA40000000000000000F1 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -398,7 +576,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = appIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "XCode Devices/XCode Devices.entitlements";
+				CODE_SIGN_ENTITLEMENTS = Editions/AppStore/SimCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 5;
@@ -421,6 +599,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = SimCleaner;
 				INFOPLIST_KEY_CFBundleName = SimCleaner;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -445,7 +624,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = appIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = "XCode Devices/XCode Devices.entitlements";
+				CODE_SIGN_ENTITLEMENTS = Editions/AppStore/SimCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 5;
@@ -468,6 +647,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = SimCleaner;
 				INFOPLIST_KEY_CFBundleName = SimCleaner;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -567,6 +747,118 @@
 			};
 			name = Release;
 		};
+		5C1EA40000000000000000F3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = appIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Editions/Pro/SimCleaner Pro.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KHU94Q2JSS;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "SimCleaner Pro";
+				INFOPLIST_KEY_CFBundleName = "SimCleaner Pro";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "stepanok.com.SimCleaner-Pro";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		5C1EA40000000000000000F4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = appIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Editions/Pro/SimCleaner Pro.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KHU94Q2JSS;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "SimCleaner Pro";
+				INFOPLIST_KEY_CFBundleName = "SimCleaner Pro";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "stepanok.com.SimCleaner-Pro";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		5C1EA40000000000000000F6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KHU94Q2JSS;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "stepanok.com.SimCleaner-Pro.cli";
+				PRODUCT_MODULE_NAME = SimCleanerCLI;
+				PRODUCT_NAME = simcleaner;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		5C1EA40000000000000000F7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KHU94Q2JSS;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "stepanok.com.SimCleaner-Pro.cli";
+				PRODUCT_MODULE_NAME = SimCleanerCLI;
+				PRODUCT_NAME = simcleaner;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -606,7 +898,84 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		5C1EA40000000000000000F5 /* Build configuration list for PBXNativeTarget "SimCleaner Pro" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5C1EA40000000000000000F3 /* Debug */,
+				5C1EA40000000000000000F4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5C1EA40000000000000000F8 /* Build configuration list for PBXNativeTarget "SimCleanerCLI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5C1EA40000000000000000F6 /* Debug */,
+				5C1EA40000000000000000F7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5C1EA40000000000000000B1 /* XCLocalSwiftPackageReference "Packages/SimCleanerKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SimCleanerKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5C1EA40000000000000000BB /* XCRemoteSwiftPackageReference "swift-argument-parser" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-argument-parser";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.8.0;
+			};
+		};
+		5C1EA4000000000000000101 /* XCRemoteSwiftPackageReference "Pow" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/EmergeTools/Pow";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5C1EA40000000000000000B2 /* SimCleanerKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C1EA40000000000000000B1 /* XCLocalSwiftPackageReference "Packages/SimCleanerKit" */;
+			productName = SimCleanerKit;
+		};
+		5C1EA40000000000000000B3 /* SimCleanerKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C1EA40000000000000000B1 /* XCLocalSwiftPackageReference "Packages/SimCleanerKit" */;
+			productName = SimCleanerKit;
+		};
+		5C1EA40000000000000000B4 /* SimCleanerKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C1EA40000000000000000B1 /* XCLocalSwiftPackageReference "Packages/SimCleanerKit" */;
+			productName = SimCleanerKit;
+		};
+		5C1EA40000000000000000BA /* ArgumentParser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C1EA40000000000000000BB /* XCRemoteSwiftPackageReference "swift-argument-parser" */;
+			productName = ArgumentParser;
+		};
+		5C1EA4000000000000000102 /* Pow */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C1EA4000000000000000101 /* XCRemoteSwiftPackageReference "Pow" */;
+			productName = Pow;
+		};
+		5C1EA4000000000000000103 /* Pow */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C1EA4000000000000000101 /* XCRemoteSwiftPackageReference "Pow" */;
+			productName = Pow;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CE4DACB02ED1DE290042A643 /* Project object */;
 }

@@ -6,29 +6,109 @@
 //
 
 import AppKit
+import SimCleanerKit
 import SwiftUI
 
-struct ContentView: View {
-    @StateObject private var viewModel = DeviceScanner()
-    @StateObject private var ratingManager = RatingManager()
-    @State private var sortOrder: [KeyPathComparator<SimulatorDevice>] = [KeyPathComparator(\.sizeBytes, order: .reverse)]
-    @State private var searchText: String = ""
-    @State private var selectedFilter: SidebarSelection = .all
-    @State private var selectedDeviceIDs: Set<String> = []
-    @State private var devicePendingDeletion: SimulatorDevice?
-    @State private var selectionPendingDeletion: [SimulatorDevice]?
-    @State private var showDeleteConfirmation: Bool = false
-    @State private var showBulkDeleteConfirmation: Bool = false
-    @State private var deletionInProgress: Set<String> = []
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @FocusState private var isSearchFocused: Bool
-    @State private var showPermissionSheet: Bool = false
-    @State private var showSupportSheet: Bool = false
-    @State private var showRuntimeSheet: Bool = false
+enum SidebarSelection: Hashable {
+    case all
+    case category(DeviceCategory)
+    case runtime(String)
+    case recentlyUsed
+    case running
+    case withApps
+    case empty
+    case suggestions
+    case xcodeCaches
+    case runtimes
 
-    private let sizeColumnWidth: CGFloat = 90
-    private let lastUsedColumnWidth: CGFloat = 150
-    private let appsColumnWidth: CGFloat = 140
+    var isCleanupPage: Bool {
+        switch self {
+        case .suggestions, .xcodeCaches, .runtimes: return true
+        default: return false
+        }
+    }
+
+    /// How the page is remembered between launches.
+    var storageKey: String {
+        switch self {
+        case .all: return "all"
+        case .category(let category): return "category:\(category.rawValue)"
+        case .runtime(let name): return "runtime:\(name)"
+        case .recentlyUsed: return "recentlyUsed"
+        case .running: return "running"
+        case .withApps: return "withApps"
+        case .empty: return "empty"
+        case .suggestions: return "suggestions"
+        case .xcodeCaches: return "xcodeCaches"
+        case .runtimes: return "runtimes"
+        }
+    }
+
+    init(storageKey: String) {
+        let parts = storageKey.split(separator: ":", maxSplits: 1).map(String.init)
+        switch (parts.first ?? "", parts.count > 1 ? parts[1] : "") {
+        case ("category", let raw): self = DeviceCategory(rawValue: raw).map(SidebarSelection.category) ?? .all
+        case ("runtime", let name) where !name.isEmpty: self = .runtime(name)
+        case ("recentlyUsed", _): self = .recentlyUsed
+        case ("running", _): self = .running
+        case ("withApps", _): self = .withApps
+        case ("empty", _): self = .empty
+        case ("suggestions", _): self = .suggestions
+        case ("xcodeCaches", _): self = .xcodeCaches
+        case ("runtimes", _): self = .runtimes
+        default: self = .all
+        }
+    }
+}
+
+/// A destructive action waiting for confirmation.
+struct PendingDeviceAction: Identifiable {
+    enum Kind { case delete, erase }
+    let id = UUID()
+    let kind: Kind
+    let devices: [SimulatorDevice]
+}
+
+struct PendingUninstall: Identifiable {
+    let id = UUID()
+    let app: SimulatorApp
+    let device: SimulatorDevice
+}
+
+/// Asks for a name before duplicating or renaming.
+struct NamePrompt: Identifiable {
+    enum Kind { case duplicate, rename }
+    let id = UUID()
+    let kind: Kind
+    let device: SimulatorDevice
+}
+
+#if DEBUG
+/// Debug builds can measure another folder laid out like ~/Library/Developer, for screenshots with
+/// sample projects and for trying changes on throwaway data: SIMCLEANER_DEVELOPER_FOLDER=/path.
+private let developerFolder = ProcessInfo.processInfo.environment["SIMCLEANER_DEVELOPER_FOLDER"]
+    .map { URL(fileURLWithPath: $0, isDirectory: true) } ?? DeveloperPaths.developerFolder
+#else
+private let developerFolder = DeveloperPaths.developerFolder
+#endif
+
+struct ContentView: View {
+    @StateObject private var scanner = DeviceScanner(developerFolder: developerFolder, cleanupSession: .shared)
+    @ObservedObject private var session = CleanupSession.shared
+    @AppStorage("lastPage") private var lastPage = SidebarSelection.all.storageKey
+    @State private var selection: SidebarSelection = .all
+    /// The Xcode caches page's category, so the storage bar can open the right one.
+    @State private var cachesCategory: DeveloperStorageCategory = .derivedData
+    @State private var searchText = ""
+    @State private var selectedDeviceIDs: Set<String> = []
+    @State private var sortOrder: [KeyPathComparator<SimulatorDevice>] = [KeyPathComparator(\.sizeBytes, order: .reverse)]
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var showPermissionSheet = false
+    @State private var batchInstall: BatchInstallTargets?
+    @State private var pendingAction: PendingDeviceAction?
+    @State private var pendingUninstall: PendingUninstall?
+    @State private var namePrompt: NamePrompt?
+    @AppStorage("idleDays") private var idleDays = 14
 
     private let recentThreshold: TimeInterval = 60 * 60 * 24 * 14
 
@@ -37,909 +117,437 @@ struct ContentView: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
         } content: {
-            simulatorList
+            contentColumn
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-//                .background(Color(nsColor: .controlBackgroundColor))
+                .navigationSplitViewColumnWidth(min: 560, ideal: 760)
         } detail: {
-            detailPanel
-                .navigationSplitViewColumnWidth(min: 280, ideal: 280, max: 420)
+            detailColumn
+                .navigationSplitViewColumnWidth(min: 300, ideal: 320, max: 380)
         }
         .navigationSplitViewStyle(.balanced)
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 Divider()
-                storagePanel
+                StoragePanel(scanner: scanner, session: session, onSelect: show) {
+                    scanner.chooseDevicesDirectory()
+                }
             }
             .background(.background)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showSupportSheet = true
-                } label: {
-                    HStack {
-                        Image(systemName: "heart")
-                        Text("Support Author")
-                    }
-                    .padding(.horizontal)
-                }
-                .help("Support Author")
+                EditionToolbarButton()
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    viewModel.refresh()
+                    batchInstall = BatchInstallTargets(devices: selectedDevices)
                 } label: {
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .controlSize(.small)
+                    Label("Install App", systemImage: "square.and.arrow.down.on.square")
+                }
+                .help("Install one build on several simulators")
+                .disabled(!scanner.canManageDevices)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    scanner.refreshEverything()
+                } label: {
+                    if scanner.isMeasuring {
+                        ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
-                .help("Refresh simulators")
+                .help("Measure everything again")
                 .keyboardShortcut("r", modifiers: [.command])
-                .disabled(viewModel.isLoading)
+                .disabled(scanner.isMeasuring)
             }
         }
-//        .background(Color(nsColor: .controlBackgroundColor))
         .onAppear {
-            isSearchFocused = false
-            if !viewModel.hasFolderAccess {
-                showPermissionSheet = true
-            }
-            if viewModel.devices.isEmpty {
-                viewModel.refresh()
-            }
+            selection = SidebarSelection(storageKey: lastPage)
+            scanner.start()
+            if !scanner.hasFolderAccess { showPermissionSheet = true }
         }
-        .onChange(of: viewModel.hasFolderAccess) { _, hasAccess in
-            if hasAccess {
-                showPermissionSheet = false
-            }
+        .onChange(of: selection) { _, page in
+            lastPage = page.storageKey
+        }
+        .onChange(of: scanner.hasFolderAccess) { _, hasAccess in
+            if hasAccess { showPermissionSheet = false }
         }
         .onChange(of: filteredDeviceIDs, initial: false) { _, ids in
-            let validSelection = selectedDeviceIDs.intersection(ids)
-            if !validSelection.isEmpty {
-                selectedDeviceIDs = validSelection
+            let valid = selectedDeviceIDs.intersection(ids)
+            if !valid.isEmpty {
+                selectedDeviceIDs = valid
             } else if let first = ids.first {
                 selectedDeviceIDs = [first]
             } else {
                 selectedDeviceIDs = []
             }
         }
-        .alert(
-            "Delete simulator?",
-            isPresented: $showDeleteConfirmation,
-            presenting: devicePendingDeletion
-        ) { device in
-            Button("Delete", role: .destructive) {
-                deletionInProgress.insert(device.udid)
-                Task {
-                    await viewModel.delete(devices: [device])
-                    deletionInProgress.remove(device.udid)
-                    devicePendingDeletion = nil
-                    if viewModel.errorMessage == nil && viewModel.deletionError == nil {
-                        ratingManager.recordSuccessfulDeletion()
-                    }
-                }
+        .confirmationDialog(confirmationTitle, isPresented: isConfirming, titleVisibility: .visible, presenting: pendingAction) { action in
+            switch action.kind {
+            case .delete:
+                Button("Delete", role: .destructive) { run { await scanner.delete(action.devices) } }
+            case .erase:
+                Button("Erase", role: .destructive) { run { await scanner.erase(action.devices) } }
             }
-            Button("Cancel", role: .cancel) {
-                devicePendingDeletion = nil
-            }
-        } message: { device in
-            let runningNote = device.isBooted ? "\n\nThis simulator is running. Shut it down in Simulator before deleting it." : ""
-            Text("\(device.name)\n\(device.runtime)\nUDID: \(device.udid)\(runningNote)")
+            Button("Cancel", role: .cancel) {}
+        } message: { action in
+            Text(confirmationMessage(for: action))
         }
-        .alert(
-            "Delete selected simulators?",
-            isPresented: $showBulkDeleteConfirmation,
-            presenting: selectionPendingDeletion
-        ) { selection in
-            Button("Delete", role: .destructive) {
-                let ids = Set(selection.map(\.udid))
-                deletionInProgress.formUnion(ids)
-                Task {
-                    await viewModel.delete(devices: selection)
-                    deletionInProgress.subtract(ids)
-                    selectionPendingDeletion = nil
-                    if viewModel.errorMessage == nil && viewModel.deletionError == nil {
-                        ratingManager.recordSuccessfulDeletion()
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                selectionPendingDeletion = nil
-            }
-        } message: { selection in
-            let totalSize = selection.reduce(0) { $0 + $1.sizeBytes }
-            let runningCount = selection.filter(\.isBooted).count
-            let runningNote = runningCount > 0 ? "\n\n\(runningCount) of them \(runningCount == 1 ? "is" : "are") running. Shut \(runningCount == 1 ? "it" : "them") down in Simulator first." : ""
-            Text("\(selection.count) simulators • \(ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file))\(runningNote)")
+        .confirmationDialog("Remove \(pendingUninstall?.app.name ?? "app")?", isPresented: isConfirmingUninstall, titleVisibility: .visible, presenting: pendingUninstall) { pending in
+            Button("Remove", role: .destructive) { run { await scanner.uninstall(pending.app, from: pending.device) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text(uninstallMessage(for: pending))
         }
-        .alert(
-            "Some simulators weren't deleted",
-            isPresented: Binding(
-                get: { viewModel.deletionError != nil },
-                set: { if !$0 { viewModel.deletionError = nil } }
-            ),
-            presenting: viewModel.deletionError
-        ) { _ in
+        .alert(scanner.report?.title ?? "", isPresented: hasReport, presenting: scanner.report) { _ in
             Button("OK", role: .cancel) {}
-        } message: { message in
-            Text("The list now shows what's left on disk.\n\n\(message)")
+        } message: { report in
+            Text("The list now shows what's left.\n\n" + report.failures.joined(separator: "\n"))
         }
         .sheet(isPresented: $showPermissionSheet) {
-            permissionRequestSheet
-                .presentationDetents([.fraction(0.6)])
-                .interactiveDismissDisabled()
-        }
-        .sheet(isPresented: $showSupportSheet) {
-            SupportAuthorView()
-        }
-        .sheet(isPresented: $showRuntimeSheet) {
-            RuntimeStorageSheet(runtimeStorageBytes: viewModel.runtimeStorageBytes)
-        }
-        .overlay {
-            if let progress = viewModel.deletionProgress {
-                deletionProgressOverlay(progress: progress)
+            PermissionRequestSheet {
+                showPermissionSheet = false
+                scanner.chooseDevicesDirectory()
+            } onCancel: {
+                showPermissionSheet = false
             }
+            .presentationDetents([.fraction(0.6)])
+            .interactiveDismissDisabled()
+        }
+        .sheet(item: $namePrompt) { prompt in
+            switch prompt.kind {
+            case .duplicate:
+                NamePromptSheet(
+                    title: "Duplicate \(prompt.device.name)",
+                    message: "The copy gets the same apps, data and settings. APFS shares the files, so it takes almost no extra space until either simulator changes them.",
+                    confirmTitle: "Duplicate",
+                    name: "\(prompt.device.name) copy"
+                ) { name in
+                    run { await scanner.duplicate(prompt.device, name: name) }
+                }
+            case .rename:
+                NamePromptSheet(title: "Rename simulator", message: "Xcode and Device Hub show the new name right away.", confirmTitle: "Rename", name: prompt.device.name) { name in
+                    run { await scanner.rename(prompt.device, to: name) }
+                }
+            }
+        }
+        .sheet(item: $batchInstall) { targets in
+            BatchInstallSheet(scanner: scanner, initialTargets: targets.devices)
         }
     }
 
-    private var sidebar: some View {
-        ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    sidebarSection(title: "Devices") {
-                        sidebarRow(
-                            title: "All devices",
-                            subtitle: "\(viewModel.devices.count)",
-                        systemImage: "tray.full",
-                        isSelected: selectedFilter == .all
-                    ) { selectedFilter = .all }
-                    
-                    sidebarRow(
-                        title: "iPhone",
-                        subtitle: "\(count(for: .category(.iPhone)))",
-                        systemImage: "iphone",
-                        isSelected: selectedFilter == .category(.iPhone)
-                    ) { selectedFilter = .category(.iPhone) }
-                    
-                    sidebarRow(
-                        title: "iPad",
-                        subtitle: "\(count(for: .category(.iPad)))",
-                        systemImage: "ipad",
-                        isSelected: selectedFilter == .category(.iPad)
-                    ) { selectedFilter = .category(.iPad) }
-                    
-                    sidebarRow(
-                        title: "tvOS",
-                        subtitle: "\(count(for: .category(.TV)))",
-                        systemImage: "appletv",
-                        isSelected: selectedFilter == .category(.TV)
-                    ) { selectedFilter = .category(.TV) }
-                    
-                    sidebarRow(
-                        title: "watchOS",
-                        subtitle: "\(count(for: .category(.Watch)))",
-                        systemImage: "applewatch",
-                        isSelected: selectedFilter == .category(.Watch)
-                    ) { selectedFilter = .category(.Watch) }
-                    
-                    sidebarRow(
-                        title: "visionOS",
-                        subtitle: "\(count(for: .category(.Vision)))",
-                        systemImage: "visionpro",
-                        isSelected: selectedFilter == .category(.Vision)
-                    ) { selectedFilter = .category(.Vision) }
-                }
-                
-                sidebarSection(title: "iOS Versions") {
-                    if runtimeFilters.isEmpty {
-                        Text("No versions found.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 10)
-                    } else {
-                        ForEach(runtimeFilters) { runtime in
-                            sidebarRow(
-                                title: runtime.runtime,
-                                subtitle: "\(runtime.count)",
-                                systemImage: "chevron.right.circle",
-                                isSelected: selectedFilter == .runtime(runtime.runtime)
-                            ) { selectedFilter = .runtime(runtime.runtime) }
-                        }
-                    }
-                }
-                
-                sidebarSection(title: "Statuses") {
-                    sidebarRow(
-                        title: "Recently used",
-                        subtitle: "\(count(for: .recentlyUsed))",
-                        systemImage: "clock.badge.checkmark",
-                        isSelected: selectedFilter == .recentlyUsed
-                    ) { selectedFilter = .recentlyUsed }
-                    
-                    sidebarRow(
-                        title: "With apps",
-                        subtitle: "\(count(for: .withApps))",
-                        systemImage: "square.stack.3d.up.fill",
-                        isSelected: selectedFilter == .withApps
-                    ) { selectedFilter = .withApps }
-                    
-                    sidebarRow(
-                        title: "Empty",
-                        subtitle: "\(count(for: .empty))",
-                        systemImage: "tray",
-                        isSelected: selectedFilter == .empty
-                    ) { selectedFilter = .empty }
-                }
-                Spacer(minLength: 160)
-            }
-            .padding(16)
-            .frame(width: 240, alignment: .topLeading)
-            .frame(maxHeight: .infinity, alignment: .topLeading)
-//            .background(Color(nsColor: .windowBackgroundColor))
-        }
-    }
+    // MARK: - Columns
 
-    private func sidebarSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 6, content: content)
-        }
-    }
-
-    private func sidebarRow(title: String, subtitle: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.subheadline)
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if isSelected {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
+    @ViewBuilder
+    private var contentColumn: some View {
+        switch selection {
+        case .suggestions:
+            SuggestionsView(scanner: scanner, idleDays: $idleDays) { action in
+                pendingAction = action
+            } showDevice: { device in
+                selection = .all
+                selectedDeviceIDs = [device.id]
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        case .xcodeCaches:
+            XcodeCachesView(scanner: scanner, category: $cachesCategory)
+        case .runtimes:
+            RuntimesView(scanner: scanner)
+        default:
+            SimulatorListView(
+                scanner: scanner,
+                devices: sortedDevices,
+                totalCount: scanner.devices.count,
+                searchText: $searchText,
+                selection: tableSelection,
+                sortOrder: $sortOrder,
+                runtimeFilter: runtimeFilterName,
+                onSelectAll: { selectedDeviceIDs = Set(filteredDeviceIDs) },
+                onRequestAccess: { scanner.chooseDevicesDirectory() }
             )
         }
-        .buttonStyle(.plain)
     }
 
-    private var simulatorList: some View {
-        VStack(spacing: 0) {
-            listHeader
-            if viewModel.scanProgress != nil {
-                loadingProgressBar
-            }
-            Divider()
-
-            Group {
-                switch listState {
-                case .needsAccess:
-                    accessPlaceholder
-                case .error(let errorMessage):
-                    VStack(spacing: 8) {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                        Text("SimCleaner needs read and write access to your Developer folder.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        VStack(spacing: 6) {
-                            Button("Choose Developer Folder…") {
-                                viewModel.chooseDevicesDirectory()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            Text(viewModel.devicesURL.path)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                case .loading:
-                    EmptyView()
-                case .runtimeFolder, .unreadableFolders, .noDeviceFolders, .noSimulators:
-                    noSimulatorsPlaceholder(listState)
-                case .noMatches:
-                    ContentUnavailableView {
-                        Label("No matching simulators", systemImage: "line.3.horizontal.decrease.circle")
-                    } description: {
-                        Text("Try another filter or clear the search.")
-                    }
-                case .list:
-                    Table(sortedDevices, selection: tableSelection, sortOrder: $sortOrder) {
-                        TableColumn("Type", value: \.deviceType) { device in
-                            HStack(spacing: 12) {
-                                DeviceIconView(device: device, size: 32, weight: .medium)
-                                    .frame(width: 56, height: 56)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(device.name)
-                                        .font(.headline)
-                                        .lineLimit(1)
-                                    HStack(spacing: 6) {
-                                        Text(device.runtime)
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                        if let badge = device.setKind.badge {
-                                            Tag(text: badge)
-                                        }
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        TableColumn("Size", value: \.sizeBytes) { device in
-                            Text(device.sizeDescription)
-                                .font(.callout.weight(.semibold))
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        .width(sizeColumnWidth)
-                        TableColumn("Last used", value: \.lastUsedSortKey) { device in
-                            Text(device.lastUsedDescription)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .width(lastUsedColumnWidth)
-                        TableColumn("Apps", value: \.appCount) { device in
-                            let appIcons = Array(device.apps.prefix(4))
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 6) {
-                                    ForEach(appIcons) { app in
-                                        AppIconView(app: app)
-                                            .frame(width: 22, height: 22)
-                                            .cornerRadius(6)
-                                    }
-                                }
-                                if device.appCount > appIcons.count {
-                                    Text("and \(device.appCount - appIcons.count) more")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .width(appsColumnWidth)
-                    }
-                    .safeAreaPadding(EdgeInsets(top: 0, leading: 0, bottom: 100, trailing: 0))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .tableStyle(.inset(alternatesRowBackgrounds: true))
-                }
+    @ViewBuilder
+    private var detailColumn: some View {
+        if selection.isCleanupPage {
+            CleanupDetailView(scanner: scanner, page: selection)
+        } else if selectedDevices.count > 1 {
+            MultiSelectionPanel(
+                scanner: scanner,
+                devices: selectedDevices,
+                onDelete: { pendingAction = PendingDeviceAction(kind: .delete, devices: selectedDevices) },
+                onErase: { pendingAction = PendingDeviceAction(kind: .erase, devices: selectedDevices) },
+                onShutDown: { run { await scanner.shutDown(selectedDevices.filter { $0.state.isRunning }) } },
+                onInstall: { batchInstall = BatchInstallTargets(devices: selectedDevices) }
+            )
+        } else if let device = selectedDevices.first {
+            DeviceDetailView(
+                scanner: scanner,
+                device: device,
+                onDelete: { pendingAction = PendingDeviceAction(kind: .delete, devices: [device]) },
+                onErase: { pendingAction = PendingDeviceAction(kind: .erase, devices: [device]) },
+                onUninstall: { app in pendingUninstall = PendingUninstall(app: app, device: device) },
+                onDuplicate: { namePrompt = NamePrompt(kind: .duplicate, device: device) },
+                onRename: { namePrompt = NamePrompt(kind: .rename, device: device) },
+                onInstall: { batchInstall = BatchInstallTargets(devices: [device]) }
+            )
+        } else {
+            ContentUnavailableView {
+                Label("No simulator selected", systemImage: "iphone")
+            } description: {
+                Text("Select a simulator to see its apps and what deleting it frees.")
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var listHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Simulators")
-                        .font(.headline)
-                    Text("\(filteredDevices.count) of \(viewModel.devices.count) • \(formatBytes(viewModel.totalSizeBytes)) total")
-                        .font(.caption)
+    /// Opens the page that cleans a category of the storage bar.
+    private func show(_ category: StorageCategory) {
+        switch category {
+        case .simulators:
+            selection = .all
+        case .leftovers:
+            selection = .suggestions
+        case .runtimes, .simulatorCaches:
+            selection = .runtimes
+        case .derivedData, .deviceSupport, .agentWorkspaces:
+            if let caches = category.developerStorageCategory { cachesCategory = caches }
+            selection = .xcodeCaches
+        }
+    }
+
+    // MARK: - Sidebar
+
+    /// A standard source list: sections, counts as badges, arrow keys and VoiceOver work like in Finder or Mail.
+    private var sidebar: some View {
+        List(selection: sidebarSelection) {
+            Section("Devices") {
+                sidebarRow("All devices", systemImage: "square.stack.3d.up", count: scanner.devices.count, for: .all)
+                sidebarRow("iPhone", systemImage: "iphone", count: count(for: .category(.iPhone)), for: .category(.iPhone))
+                sidebarRow("iPad", systemImage: "ipad", count: count(for: .category(.iPad)), for: .category(.iPad))
+                sidebarRow("Apple TV", systemImage: "appletv", count: count(for: .category(.TV)), for: .category(.TV))
+                sidebarRow("Apple Watch", systemImage: "applewatch", count: count(for: .category(.Watch)), for: .category(.Watch))
+                sidebarRow("Vision Pro", systemImage: "visionpro", count: count(for: .category(.Vision)), for: .category(.Vision))
+            }
+
+            Section("OS Versions") {
+                if runtimeFilters.isEmpty {
+                    Text("No versions found")
                         .foregroundStyle(.secondary)
+                        .selectionDisabled()
+                } else {
+                    ForEach(runtimeFilters, id: \.name) { runtime in
+                        sidebarRow(runtime.name, systemImage: platformSymbol(for: runtime.name), count: runtime.count, for: .runtime(runtime.name))
+                            .contextMenu {
+                                Button("Select All \(runtime.name) Simulators") {
+                                    selection = .runtime(runtime.name)
+                                    selectedDeviceIDs = Set(scanner.devices.filter { $0.runtimeGroup == runtime.name }.map(\.id))
+                                }
+                            }
+                    }
                 }
-                Spacer()
-                TextField("Search by name, OS, or UDID", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
-                    .focused($isSearchFocused)
             }
 
-            if viewModel.hasFolderAccess {
-                scanLocationRow
+            Section("Statuses") {
+                sidebarRow("Running", systemImage: "play.circle", count: count(for: .running), for: .running)
+                sidebarRow("Recently used", systemImage: "clock", count: count(for: .recentlyUsed), for: .recentlyUsed)
+                sidebarRow("With apps", systemImage: "app.badge", count: count(for: .withApps), for: .withApps)
+                sidebarRow("Empty", systemImage: "tray", count: count(for: .empty), for: .empty)
+            }
+
+            Section("Clean Up") {
+                sidebarRow("Suggestions", systemImage: "wand.and.sparkles", detail: suggestionsSubtitle, for: .suggestions)
+                    .help("Simulators you haven't used, ones that can't run here, and leftover folders")
+                sidebarRow("Xcode caches", systemImage: "hammer", detail: xcodeCachesSubtitle, for: .xcodeCaches)
+                    .help("DerivedData, device support files and coding agent workspaces")
+                sidebarRow("Runtimes", systemImage: "externaldrive", detail: scanner.runtimes.isEmpty ? "" : ByteText.string(scanner.runtimesFootprintBytes), for: .runtimes)
+                    .help("The OS images simulators run on")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private var scanLocationRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Group {
-                    Image(systemName: "folder")
-                    Text(displayPath(viewModel.devicesURL))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(viewModel.devicesURL.path)
-                }
-                .foregroundStyle(.secondary)
-                Button("Change…") {
-                    viewModel.chooseDevicesDirectory()
-                }
-                .buttonStyle(.link)
-                .disabled(viewModel.isLoading)
-            }
-            .font(.caption)
-
-            if viewModel.hasCompletedScan && !viewModel.coversDeveloperFolder && !viewModel.devices.isEmpty {
-                HStack(spacing: 6) {
-                    Group {
-                        Image(systemName: "info.circle")
-                        Text("Xcode also keeps Preview devices and test clones elsewhere in ~/Library/Developer.")
-                    }
-                    .foregroundStyle(.secondary)
-                    Button("Include them…") {
-                        viewModel.chooseDevicesDirectory()
-                    }
-                    .buttonStyle(.link)
-                    .disabled(viewModel.isLoading)
-                }
-                .font(.caption)
-            }
-
-            if viewModel.isScanPartial && !viewModel.devices.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text("\(unreadableSummary) Some simulators may be missing.")
-                        .foregroundStyle(.secondary)
-                    Button("Choose Folder Again…") {
-                        viewModel.chooseDevicesDirectory()
-                    }
-                    .buttonStyle(.link)
-                    .disabled(viewModel.isLoading)
-                }
-                .font(.caption)
-            }
-
-            if viewModel.unrecognizedSizeBytes > 0 {
-                Text("\(viewModel.unrecognizedFolderCount) leftover \(viewModel.unrecognizedFolderCount == 1 ? "folder" : "folders") without simulator info (\(formatBytes(viewModel.unrecognizedSizeBytes))) \(viewModel.unrecognizedFolderCount == 1 ? "isn't" : "aren't") listed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        .listStyle(.sidebar)
+        .onChange(of: selection) { _, page in
+            switch page {
+            case .xcodeCaches where !scanner.hasScannedDeveloperStorage:
+                scanner.refreshDeveloperStorage()
+            case .runtimes:
+                scanner.refreshRuntimes()
+            default:
+                break
             }
         }
     }
 
-    private var listState: SimulatorListState {
-        SimulatorListState.resolve(
-            hasFolderAccess: viewModel.hasFolderAccess,
-            scannedURL: viewModel.devicesURL,
-            errorMessage: viewModel.errorMessage,
-            isLoading: viewModel.isLoading,
-            hasCompletedScan: viewModel.hasCompletedScan,
-            deviceCount: viewModel.devices.count,
-            filteredCount: filteredDevices.count,
-            deviceSetCount: viewModel.deviceSets.count,
-            isScanPartial: viewModel.isScanPartial
+    /// A page is always selected; clicking empty space in the sidebar doesn't clear it.
+    private var sidebarSelection: Binding<SidebarSelection?> {
+        Binding(get: { selection }, set: { if let page = $0 { selection = page } })
+    }
+
+    /// Up to what the suggestions free; the page says how sharing makes it a range.
+    private var suggestionsSubtitle: String {
+        let total = scanner.cleanupSuggestions(idleDays: idleDays).reduce(DiskFootprint.zero) { $0 + $1.footprint }
+        return total.allocatedBytes > 0 ? ByteText.string(total.allocatedBytes) : ""
+    }
+
+    private var xcodeCachesSubtitle: String {
+        guard scanner.hasScannedDeveloperStorage else { return "" }
+        return ByteText.string(scanner.developerStorage.footprint.allocatedBytes)
+    }
+
+    private func sidebarRow(_ title: String, systemImage: String, count: Int, for target: SidebarSelection) -> some View {
+        Label(title, systemImage: systemImage)
+            .badge(count)
+            .tag(target)
+    }
+
+    private func sidebarRow(_ title: String, systemImage: String, detail: String, for target: SidebarSelection) -> some View {
+        Label(title, systemImage: systemImage)
+            .badge(detail.isEmpty ? nil : Text(detail).monospacedDigit())
+            .tag(target)
+    }
+
+    /// "iOS 27.0" → the iPhone symbol, so versions of different platforms read apart at a glance.
+    private func platformSymbol(for runtimeName: String) -> String {
+        switch runtimeName.split(separator: " ").first.map(String.init) {
+        case "watchOS": return "applewatch"
+        case "tvOS": return "appletv"
+        case "visionOS", "xrOS": return "visionpro"
+        default: return "iphone"
+        }
+    }
+
+    // MARK: - Filtering
+
+    private var filteredDevices: [SimulatorDevice] {
+        let words = searchText.lowercased().split(whereSeparator: \.isWhitespace)
+        return scanner.devices.filter { device in
+            guard passes(device, selection) else { return false }
+            guard !words.isEmpty else { return true }
+            let haystack = ([device.name, device.deviceType, device.runtime, device.udid, device.setKind.badge ?? ""] + device.apps.map(\.name))
+                .joined(separator: " ")
+                .lowercased()
+            return words.allSatisfy { haystack.contains($0) }
+        }
+    }
+
+    private var sortedDevices: [SimulatorDevice] { filteredDevices.sorted(using: sortOrder) }
+    private var filteredDeviceIDs: [String] { sortedDevices.map(\.id) }
+
+    private var selectedDevices: [SimulatorDevice] {
+        guard !selectedDeviceIDs.isEmpty else { return [] }
+        return sortedDevices.filter { selectedDeviceIDs.contains($0.id) }
+    }
+
+    private var tableSelection: Binding<Set<String>> {
+        Binding(
+            get: { selectedDeviceIDs.intersection(filteredDeviceIDs) },
+            set: { selectedDeviceIDs = $0.intersection(filteredDeviceIDs) }
         )
     }
 
-    @ViewBuilder
-    private func noSimulatorsPlaceholder(_ state: SimulatorListState) -> some View {
-        ContentUnavailableView {
-            switch state {
-            case .runtimeFolder:
-                Label("This folder holds simulator runtimes", systemImage: "externaldrive")
-            case .unreadableFolders:
-                Label("Some simulator folders couldn't be read", systemImage: "exclamationmark.triangle")
-            case .noDeviceFolders:
-                Label("No simulators in this folder", systemImage: "folder.badge.questionmark")
-            default:
-                Label("No simulators found", systemImage: "archivebox")
-            }
-        } description: {
-            switch state {
-            case .runtimeFolder:
-                Text("Runtimes are the iOS system images that simulators run on. Xcode manages them, and SimCleaner can't delete them. To find your simulators, choose the Developer folder in your Library.")
-            case .unreadableFolders:
-                Text("\(unreadableSummary) Your simulators may be there. Choose ~/Library/Developer again to give SimCleaner access.")
-            case .noDeviceFolders:
-                Text("Xcode keeps simulators in the Developer folder inside your Library (~/Library/Developer). Choose that folder and SimCleaner will find all of them.")
-            default:
-                Text("Xcode hasn't created any simulators here. If you're looking for gigabytes of simulator data, it's probably in runtimes, which Xcode manages.")
-            }
-        } actions: {
-            if state != .noSimulators {
-                Button("Choose Developer Folder…") {
-                    viewModel.chooseDevicesDirectory()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            Button("About Runtimes") {
-                showRuntimeSheet = true
-            }
+    private var runtimeFilterName: String? {
+        if case .runtime(let name) = selection { return name }
+        return nil
+    }
+
+    private var runtimeFilters: [(name: String, count: Int)] {
+        Dictionary(grouping: scanner.devices, by: \.runtimeGroup)
+            .filter { !$0.key.isEmpty }
+            .map { (name: $0.key, count: $0.value.count) }
+            .sorted { RuntimeSortKey($0.name) > RuntimeSortKey($1.name) }
+    }
+
+    private func passes(_ device: SimulatorDevice, _ filter: SidebarSelection) -> Bool {
+        switch filter {
+        case .all, .suggestions, .xcodeCaches, .runtimes:
+            return true
+        case .category(let category):
+            return device.category == category
+        case .runtime(let runtime):
+            return device.runtimeGroup == runtime || device.runtime == runtime
+        case .recentlyUsed:
+            guard let last = device.lastUsed else { return false }
+            return Date().timeIntervalSince(last) <= recentThreshold
+        case .running:
+            return device.state.isRunning
+        case .withApps:
+            return device.appCount > 0
+        case .empty:
+            return device.appCount == 0
         }
     }
 
-    /// "Couldn't open XCTestDevices." / "Couldn't read 2 simulators." for the partial-scan notices.
-    private var unreadableSummary: String {
-        var parts: [String] = []
-        let locations = viewModel.unreadableLocations
-        if let first = locations.first {
-            let name = first.lastPathComponent
-            parts.append(locations.count == 1 ? "Couldn't open \(name)." : "Couldn't open \(name) and \(locations.count - 1) more \(locations.count == 2 ? "folder" : "folders").")
-        }
-        let devices = viewModel.unreadableDeviceCount
-        if devices > 0 {
-            parts.append("Couldn't read \(devices) \(devices == 1 ? "simulator" : "simulators").")
-        }
-        return parts.joined(separator: " ")
+    private func count(for filter: SidebarSelection) -> Int {
+        scanner.devices.filter { passes($0, filter) }.count
     }
 
-    /// Shows the path with ~ for the real home folder (the sandbox would otherwise abbreviate the container path).
-    private func displayPath(_ url: URL) -> String {
-        let home = DeviceScanner.realHomeDirectory.standardizedFileURL.path
-        let path = url.standardizedFileURL.path
-        if path == home { return "~" }
-        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
-        return path
+    // MARK: - Confirmations
+
+    private var isConfirming: Binding<Bool> {
+        Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } })
     }
 
-    @ViewBuilder
-    private var loadingProgressBar: some View {
-        if let progress = viewModel.scanProgress {
-            HStack(spacing: 12) {
-                ProgressView(value: Double(progress.completed), total: Double(max(progress.total, 1))) {
-                    Text("Scanning simulators...")
-                } currentValueLabel: {
-                    Text(progress.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                .progressViewStyle(.linear)
-//                .frame(maxWidth: 420)
-//                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+    private var isConfirmingUninstall: Binding<Bool> {
+        Binding(get: { pendingUninstall != nil }, set: { if !$0 { pendingUninstall = nil } })
+    }
+
+    private var hasReport: Binding<Bool> {
+        Binding(get: { scanner.report != nil }, set: { if !$0 { scanner.report = nil } })
+    }
+
+    private var confirmationTitle: String {
+        guard let action = pendingAction else { return "" }
+        let noun = action.devices.count == 1 ? "\u{201C}\(action.devices[0].name)\u{201D}" : "\(action.devices.count) simulators"
+        switch action.kind {
+        case .delete: return "Delete \(noun)?"
+        case .erase: return "Erase \(noun)?"
         }
     }
 
-//    @ViewBuilder
-//    private var loadingPlaceholder: some View {
-//        VStack(spacing: 12) {
-//            ProgressView()
-////            Text("Scanning simulators...")
-////                .foregroundStyle(.secondary)
-//        }
-//        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-//    }
-
-    private var detailPanel: some View {
-        ScrollView {
-            VStack(alignment: .center, spacing: 16) {
-                if selectedDevices.count > 1 {
-                    multiSelectionPanel
-                } else if let device = primarySelectedDevice {
-                    ZStack {
-                        
-                        LinearGradient(
-                            colors: [DeviceIcon.for(category: device.category).background.opacity(0.2), .clear],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .top)
-                        .padding(-28)
-                        
-                        VStack(spacing: 14) {
-                            DeviceIconView(device: device, size: 128, weight: .ultraLight)
-                                .frame(width: 90, height: 120)
-                                .padding(.top, 24)
-                            VStack(spacing: 4) {
-                                Text(device.name)
-                                    .font(.title3.bold())
-                                Text(device.runtime)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Text(device.deviceType)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                if device.setKind.badge != nil || device.isBooted {
-                                    HStack(spacing: 6) {
-                                        if let badge = device.setKind.badge {
-                                            Tag(text: badge)
-                                        }
-                                        if device.isBooted {
-                                            Tag(text: "Running")
-                                        }
-                                    }
-                                    .padding(.top, 4)
-                                }
-                            }
-                        }
-                    }
-                    
-                    VStack(spacing: 10) {
-                        PrimaryActionButton(title: "Launch simulator", systemImage: "play.fill") {
-                            runSimulator(device)
-                        }
-                        
-                        SecondaryActionButton(title: "Reveal container", systemImage: "folder") {
-                            revealFolder(device.rootPath)
-                        }
-                        
-                        DestructiveActionButton(
-                            title: deletionInProgress.contains(device.udid) ? "Deleting..." : "Delete",
-                            systemImage: "trash",
-                            isDisabled: deletionInProgress.contains(device.udid) || viewModel.isLoading
-                        ) {
-                            devicePendingDeletion = device
-                            showDeleteConfirmation = true
-                        }
-                    }
-                    .padding(.top, 4)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Storage usage")
-                            .font(.headline)
-                        ProgressView(value: Double(device.sizeBytes), total: Double(max(viewModel.totalSizeBytes, 1)))
-                            .tint(.blue)
-                        HStack {
-                            Text("\(device.sizeDescription) used")
-                                .fontWeight(.bold)
-                            Spacer()
-                            let free = max(viewModel.totalSizeBytes - device.sizeBytes, 0)
-                            Text("\(formatBytes(free)) used by other simulators")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 10)
-                    
-                    VStack(alignment: .leading, spacing: 10) {
-                        if !device.apps.isEmpty {
-                            Text("Installed apps")
-                                .font(.headline)
-                        }
-                        if device.apps.isEmpty {
-                            Text("No apps in this simulator.")
-                                .foregroundStyle(.secondary)
-                                .font(.callout)
-                                .padding(.top, 64)
-                        } else {
-                            ForEach(device.apps.sorted { $0.sizeBytes > $1.sizeBytes }) { app in
-                                HStack(spacing: 10) {
-                                    AppIconView(app: app)
-                                        .frame(width: 26, height: 26)
-                                        .cornerRadius(6)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(app.name)
-                                            .font(.subheadline)
-                                        Text(app.sizeDescription)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.vertical, 6)
-                                .padding(.horizontal, 10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color.gray.opacity(0.06))
-                                )
-                            }
-                            Spacer(minLength: 160)
-                        }
-                        
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Select a simulator")
-                            .font(.headline)
-                        Text("Click a device or storage segment below to see details.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-            }
-            .padding(20)
-//            .frame(width: 360, alignment: .top)
-            .frame(maxHeight: .infinity, alignment: .top)
+    private func confirmationMessage(for action: PendingDeviceAction) -> String {
+        let footprint = action.devices.reduce(DiskFootprint.zero) { $0 + $1.footprint }
+        let running = action.devices.filter { $0.state.isRunning }.count
+        var lines: [String] = []
+        switch action.kind {
+        case .delete:
+            lines.append("Frees \(ByteText.freed(footprint)). Xcode and Device Hub stop listing \(action.devices.count == 1 ? "it" : "them").")
+        case .erase:
+            lines.append("Removes apps, data and settings and frees about \(ByteText.freed(footprint)). The \(action.devices.count == 1 ? "simulator stays" : "simulators stay") in Xcode and Device Hub, as fresh as when created.")
         }
-    }
-
-    private var multiSelectionPanel: some View {
-        let selection = selectedDevices
-        let namesPreview = Array(selection.prefix(6))
-        let remainingCount = max(selection.count - namesPreview.count, 0)
-
-        return VStack(spacing: 14) {
-            VStack(spacing: 6) {
-                Text("Selected simulators")
-                    .font(.title3.weight(.semibold))
-                Text("\(selection.count) selected • \(selectedDevicesSizeDescription) total")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-//                HStack {
-//                    Label("\(selection.count) items", systemImage: "rectangle.3.group")
-//                        .font(.subheadline)
-//                    Spacer()
-//                    Label(selectedDevicesSizeDescription, systemImage: "internaldrive")
-//                        .font(.subheadline)
-//                }
-//                .foregroundStyle(.secondary)
-
-                if !namesPreview.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Included")
-                            .font(.subheadline.weight(.semibold))
-                        ForEach(namesPreview) { device in
-                            HStack(spacing: 10) {
-                                DeviceIconView(device: device, size: 18, weight: .regular)
-                                    .frame(width: 22, height: 22)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(device.name)
-                                        .font(.callout)
-                                        .lineLimit(1)
-                                    Text(device.runtime)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                                Text(device.sizeDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        if remainingCount > 0 {
-                            Text("+ \(remainingCount) more")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.gray.opacity(0.06))
-                    )
-                }
-
-                if viewModel.totalSizeBytes > 0 {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Storage usage")
-                            .font(.subheadline.weight(.semibold))
-                        ProgressView(
-                            value: Double(selectedDevicesTotalSize),
-                            total: Double(max(viewModel.totalSizeBytes, 1))
-                        )
-                        .tint(.blue)
-
-                        HStack {
-                            Text("\(selectedDevicesSizeDescription) selected")
-                            Spacer()
-                            let remaining = max(viewModel.totalSizeBytes - selectedDevicesTotalSize, 0)
-                            Text("\(formatBytes(remaining)) used by other simulators")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                        if viewModel.diskTotalBytes > 0 {
-                            Text("\(percentDescription(value: selectedDevicesTotalSize, of: viewModel.diskTotalBytes)) of disk space")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-
-            DestructiveActionButton(
-                title: deletionInProgress.isEmpty ? "Delete selected simulators" : "Deleting...",
-                systemImage: "trash",
-                isDisabled: selection.isEmpty || !deletionInProgress.isEmpty || viewModel.isLoading
-            ) {
-                selectionPendingDeletion = selection
-                showBulkDeleteConfirmation = true
+        if running > 0 {
+            if scanner.canManageDevices {
+                lines.append("\(running) \(running == 1 ? "is" : "are") running and will be shut down first.")
+            } else {
+                lines.append("\(running) \(running == 1 ? "is" : "are") running. Shut \(running == 1 ? "it" : "them") down first; SimCleaner won't delete a running simulator's files.")
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        return lines.joined(separator: "\n\n")
     }
 
-    private var storagePanel: some View {
-        let nonEmptySegments = storageSegments.filter { !$0.isEmpty }
-        let emptySegments = storageSegments.filter { $0.isEmpty }
-        let emptyShareOfDisk = emptySegments.reduce(0) { $0 + $1.shareOfDisk }
-
-        let legendItems: [LegendItem] = {
-            var items: [LegendItem] = nonEmptySegments.enumerated().map { index, segment in
-                LegendItem(id: segment.id, name: segment.name, color: StorageBar.color(forIndex: index))
-            }
-            if emptyShareOfDisk > 0, let largestEmpty = emptySegments.max(by: { $0.sizeBytes < $1.sizeBytes }) {
-                items.append(LegendItem(id: largestEmpty.id, name: "Empty simulators", color: Color(nsColor: .systemGray)))
-            }
-            return items
-        }()
-
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                Text("Simulator storage")
-                    .font(.headline)
-                Spacer()
-                Text(storageSummary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Button {
-                    showRuntimeSheet = true
-                } label: {
-                    if let runtimeBytes = viewModel.runtimeStorageBytes {
-                        Label("Runtimes: \(formatBytes(runtimeBytes))", systemImage: "info.circle")
-                    } else {
-                        Label("About runtimes", systemImage: "info.circle")
-                    }
-                }
-                .buttonStyle(.link)
-                .font(.callout)
-                .help("Simulator runtimes are managed by Xcode and aren't counted here")
-            }
-
-            StorageBar(
-                segments: storageSegments,
-                freeShare: freeDiskShare
-            ) { id in
-                withAnimation {
-                    selectedFilter = .all
-                    selectedDeviceIDs = [id]
-                }
-            }
-            .frame(height: 32)
-            .padding(.trailing, 12)
-
-            if !legendItems.isEmpty {
-                Legend(items: legendItems)
-            }
+    private func uninstallMessage(for pending: PendingUninstall) -> String {
+        var text = "Removes the app and its data from \(pending.device.name). Frees about \(ByteText.freed(pending.app.footprint))."
+        if !pending.device.isBooted {
+            text += " SimCleaner starts the simulator for this and shuts it down afterwards."
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-//        .background(Color(nsColor: .windowBackgroundColor))
+        return text
     }
 
-    private var accessPlaceholder: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "folder.badge.questionmark")
-                .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text("SimCleaner needs access to your Developer folder.")
-                .font(.headline)
-            Text("Choose ~/Library/Developer. That's where Xcode keeps simulators, Preview devices and test clones.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
-            Button("Allow access") {
-                showPermissionSheet = true
-            }
-            .buttonStyle(.borderedProminent)
-            Text(displayPath(DeviceScanner.developerFolderURL))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    private func run(_ work: @escaping @MainActor () async -> Void) {
+        Task { await work() }
     }
+}
 
-    private var permissionRequestSheet: some View {
+/// Identifies one batch install sheet, possibly with no preselected simulators.
+struct BatchInstallTargets: Identifiable {
+    let id = UUID()
+    let devices: [SimulatorDevice]
+}
+
+/// Asks the App Store edition's one-time permission for ~/Library/Developer.
+struct PermissionRequestSheet: View {
+    let onChoose: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
         VStack(spacing: 20) {
             Image("iPhone-folder")
                 .resizable()
@@ -950,7 +558,7 @@ struct ContentView: View {
                 Text("Allow access to your Developer folder")
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
-                Text("Xcode stores simulators in several places inside ~/Library/Developer. Give SimCleaner access to that folder and it will find all of them. It only deletes the simulators you choose.")
+                Text("Xcode stores simulators, build caches and device support files inside ~/Library/Developer. Give SimCleaner access to that folder and it will find all of them. It only deletes what you choose.")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
@@ -958,618 +566,14 @@ struct ContentView: View {
             }
             Spacer()
             HStack(spacing: 12) {
-                Button("Cancel") {
-                    showPermissionSheet = false
-                }
-                .buttonStyle(.bordered)
-                Button("Select Folder") {
-                    showPermissionSheet = false
-                    viewModel.chooseDevicesDirectory()
-                }
-                .buttonStyle(.borderedProminent)
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+                Button("Select Folder", action: onChoose)
+                    .buttonStyle(.borderedProminent)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(28)
         .background(Color(.windowBackgroundColor))
-    }
-
-    @ViewBuilder
-    private func deletionProgressOverlay(progress: DeletionProgress) -> some View {
-        ZStack {
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
-
-            VStack(spacing: 20) {
-                Image(systemName: "trash")
-                    .font(.system(size: 36, weight: .medium))
-                    .foregroundStyle(.red)
-                    .padding(.bottom, 4)
-
-                VStack(spacing: 8) {
-                    Text("Deleting simulators...")
-                        .font(.title3.weight(.semibold))
-
-                    Text(progress.label)
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-
-                VStack(spacing: 8) {
-                    ProgressView(value: Double(progress.completed), total: Double(max(progress.total, 1)))
-                        .progressViewStyle(.linear)
-                        .frame(width: 280)
-
-                    if !progress.currentDeviceName.isEmpty {
-                        Text(progress.currentDeviceName)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Text("Freeing \(progress.sizeDescription)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(32)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.regularMaterial)
-                    .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
-            )
-        }
-        .transition(.opacity)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.deletionProgress != nil)
-    }
-
-    private var filteredDevices: [SimulatorDevice] {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let devices = viewModel.devices.filter { device in
-            guard passesFilter(device) else { return false }
-            guard !trimmed.isEmpty else { return true }
-            let haystack = "\(device.name) \(device.deviceType) \(device.runtime) \(device.udid) \(device.setKind.badge ?? "")".lowercased()
-            return haystack.contains(trimmed.lowercased())
-        }
-
-        return devices
-    }
-
-    private var sortedDevices: [SimulatorDevice] {
-        filteredDevices.sorted(using: sortOrder)
-    }
-
-    private var filteredDeviceIDs: [String] {
-        sortedDevices.map(\.id)
-    }
-
-    private var selectedDevices: [SimulatorDevice] {
-        guard !selectedDeviceIDs.isEmpty else { return [] }
-        let selectionSet = selectedDeviceIDs
-        return sortedDevices.filter { selectionSet.contains($0.id) }
-    }
-
-    private var primarySelectedDevice: SimulatorDevice? {
-        if selectedDevices.count == 1 {
-            return selectedDevices.first
-        }
-        return nil
-    }
-
-    private var selectedDevicesTotalSize: Int64 {
-        selectedDevices.reduce(0) { $0 + $1.sizeBytes }
-    }
-
-    private var selectedDevicesSizeDescription: String {
-        ByteCountFormatter.string(fromByteCount: selectedDevicesTotalSize, countStyle: .file)
-    }
-
-    private var tableSelection: Binding<Set<String>> {
-        Binding(
-            get: { selectedDeviceIDs.intersection(filteredDeviceIDs) },
-            set: { newValue in
-                selectedDeviceIDs = newValue.intersection(filteredDeviceIDs)
-            }
-        )
-    }
-
-    private var runtimeFilters: [RuntimeEntry] {
-        let grouped = Dictionary(grouping: viewModel.devices.filter { $0.runtimeGroup.lowercased().contains("ios") }, by: { $0.runtimeGroup })
-        return grouped.map { runtime, devices in
-            RuntimeEntry(runtime: runtime, count: devices.count, sortKey: RuntimeSection.sortKey(from: runtime))
-        }
-        .sorted { $0.sortKey > $1.sortKey }
-    }
-
-    private var storageSegments: [StorageSegment] {
-        guard viewModel.diskTotalBytes > 0 else { return [] }
-        let totalDisk = Double(viewModel.diskTotalBytes)
-        let totalSims = Double(max(viewModel.totalSizeBytes, 1))
-
-        return viewModel.devices
-            .sorted { $0.sizeBytes > $1.sizeBytes }
-            .compactMap { device in
-                guard device.sizeBytes > 0 else { return nil }
-                return StorageSegment(
-                    id: device.id,
-                    name: device.name,
-                    sizeBytes: device.sizeBytes,
-                    shareOfDisk: Double(device.sizeBytes) / totalDisk,
-                    shareOfSims: Double(device.sizeBytes) / totalSims,
-                    isEmpty: device.appCount == 0
-                )
-            }
-    }
-
-    private var freeDiskShare: Double {
-        guard viewModel.diskTotalBytes > 0 else { return 0 }
-        let remaining = max(Double(viewModel.diskTotalBytes - viewModel.totalSizeBytes), 0)
-        return remaining / Double(viewModel.diskTotalBytes)
-    }
-
-    private var storageSummary: String {
-        let sims = formatBytes(viewModel.totalSizeBytes)
-        let count = viewModel.devices.count
-        let diskPercent = percentDescription(value: viewModel.totalSizeBytes, of: viewModel.diskTotalBytes)
-        return "\(sims) across \(count) simulators (\(diskPercent) of disk)"
-    }
-
-    private func passesFilter(_ device: SimulatorDevice) -> Bool {
-        switch selectedFilter {
-        case .all:
-            return true
-        case .category(let category):
-            return device.category == category
-        case .runtime(let runtime):
-            return device.runtimeGroup == runtime || device.runtime == runtime
-        case .recentlyUsed:
-            guard let last = device.lastUsed else { return false }
-            return Date().timeIntervalSince(last) <= recentThreshold
-        case .withApps:
-            return device.appCount > 0
-        case .empty:
-            return device.appCount == 0
-        }
-    }
-
-    private func count(for filter: SidebarSelection) -> Int {
-        viewModel.devices.filter { device in
-            switch filter {
-            case .all:
-                return true
-            case .category(let category):
-                return device.category == category
-            case .runtime(let runtime):
-                return device.runtimeGroup == runtime || device.runtime == runtime
-            case .recentlyUsed:
-                guard let last = device.lastUsed else { return false }
-                return Date().timeIntervalSince(last) <= recentThreshold
-            case .withApps:
-                return device.appCount > 0
-            case .empty:
-                return device.appCount == 0
-            }
-        }.count
-    }
-
-    private func toggleSidebar() {
-        NSApp.keyWindow?.firstResponder?.tryToPerform(#selector(NSSplitViewController.toggleSidebar(_:)), with: nil)
-    }
-
-    private func revealFolder(_ url: URL) {
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
-
-    private func runSimulator(_ device: SimulatorDevice) {
-        // Xcode may be installed as Xcode-beta.app or under another name, so ask Launch Services first.
-        let workspace = NSWorkspace.shared
-        let simulatorApp = workspace.urlForApplication(withBundleIdentifier: "com.apple.iphonesimulator")
-            ?? workspace.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode")?
-                .appending(path: "Contents/Developer/Applications/Simulator.app")
-            ?? URL(fileURLWithPath: "/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app")
-        let config = NSWorkspace.OpenConfiguration()
-        config.arguments = ["-CurrentDeviceUDID", device.udid]
-        NSWorkspace.shared.openApplication(at: simulatorApp, configuration: config)
-    }
-
-    private func formatBytes(_ value: Int64) -> String {
-        guard value > 0 else { return "—" }
-        return ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
-    }
-
-    private func percentDescription(value: Int64, of total: Int64) -> String {
-        guard total > 0 else { return "0%" }
-        let pct = Double(value) / Double(total) * 100
-        return pct.formatted(.number.precision(.fractionLength(1))) + "%"
-    }
-}
-
-private struct StorageSegment: Identifiable {
-    let id: String
-    let name: String
-    let sizeBytes: Int64
-    let shareOfDisk: Double
-    let shareOfSims: Double
-    let isEmpty: Bool
-
-    var sizeDescription: String {
-        ByteCountFormatter.string(fromByteCount: sizeBytes, countStyle: .file)
-    }
-
-    var percentOfSims: String {
-        (shareOfSims * 100).formatted(.number.precision(.fractionLength(1)))
-    }
-}
-
-private struct StorageBar: View {
-    let segments: [StorageSegment]
-    let freeShare: Double
-    let onSelect: (String) -> Void
-
-    private struct BarItem: Identifiable {
-        let id: String
-        let share: Double
-        let minWidth: CGFloat
-        let color: Color
-        let help: String?
-        let tapID: String?
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            let totalWidth = geometry.size.width
-            let nonEmptySegments = segments.filter { !$0.isEmpty }
-            let emptySegments = segments.filter { $0.isEmpty }
-            let emptyShareOfDisk = emptySegments.reduce(0) { $0 + $1.shareOfDisk }
-            let emptyShareOfSims = emptySegments.reduce(0) { $0 + $1.shareOfSims }
-            let emptySizeBytes = emptySegments.reduce(0) { $0 + $1.sizeBytes }
-            let emptyTargetID = emptySegments.max { $0.sizeBytes < $1.sizeBytes }?.id
-
-            let items: [BarItem] = {
-                var all = nonEmptySegments.enumerated().map { index, segment in
-                    BarItem(
-                        id: segment.id,
-                        share: segment.shareOfDisk,
-                        minWidth: 3,
-                        color: StorageBar.color(forIndex: index),
-                        help: "\(segment.name) • \(segment.sizeDescription) • \(segment.percentOfSims)%",
-                        tapID: segment.id
-                    )
-                }
-
-                if emptyShareOfDisk > 0 {
-                    all.append(
-                        BarItem(
-                            id: "empty",
-                            share: emptyShareOfDisk,
-                            minWidth: 8,
-                            color: Color(nsColor: .systemGray),
-                            help: "Empty simulators • \(formatBytes(emptySizeBytes)) • \((emptyShareOfSims * 100).formatted(.number.precision(.fractionLength(1))))%",
-                            tapID: emptyTargetID
-                        )
-                    )
-                }
-
-                if freeShare > 0 {
-                    all.append(
-                        BarItem(
-                            id: "free",
-                            share: freeShare,
-                            minWidth: 8,
-                            color: Color.gray.opacity(0.25),
-                            help: nil,
-                            tapID: nil
-                        )
-                    )
-                }
-
-                return all
-            }()
-
-            HStack(spacing: 1) {
-                ForEach(Array(items.enumerated()), id: \.1.id) { index, item in
-                    Rectangle()
-                        .fill(item.color)
-                        .frame(width: max(totalWidth * item.share, item.minWidth), height: 22)
-                        .optionalHelp(item.help)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard let tapID = item.tapID else { return }
-                            onSelect(tapID)
-                        }
-                        .mask(cornerMask(for: index, lastIndex: items.count - 1))
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func cornerMask(for index: Int, lastIndex: Int) -> some View {
-        let isFirst = index == 0
-        let isLast = index == lastIndex
-
-        if isFirst || isLast {
-            UnevenRoundedRectangle(
-                topLeadingRadius: isFirst ? 4 : 0,
-                bottomLeadingRadius: isFirst ? 4 : 0,
-                bottomTrailingRadius: isLast ? 4 : 0,
-                topTrailingRadius: isLast ? 4 : 0
-            )
-        } else {
-            Rectangle()
-        }
-    }
-
-    static func color(forIndex index: Int) -> Color {
-        let palette = macPalette
-        return palette[index % palette.count]
-    }
-
-    private func formatBytes(_ value: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
-    }
-
-    private static let macPalette: [Color] = [
-        Color(nsColor: .systemRed),
-        Color(nsColor: .systemOrange),
-        Color(nsColor: .systemYellow),
-        Color(nsColor: .systemGreen),
-        Color(nsColor: .systemMint),
-        Color(nsColor: .systemTeal),
-        Color(nsColor: .systemCyan),
-        Color(nsColor: .systemBlue),
-        Color(nsColor: .systemIndigo),
-        Color(nsColor: .systemPurple),
-        Color(nsColor: .systemPink),
-        Color(nsColor: .systemBrown),
-        Color(nsColor: .systemGray)
-    ]
-}
-
-private struct LegendItem: Identifiable {
-    let id: String
-    let name: String
-    let color: Color
-}
-
-private struct Legend: View {
-    let items: [LegendItem]
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .center, spacing: 14) {
-                ForEach(items) { item in
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(item.color)
-                            .frame(width: 10, height: 10)
-                        Text(item.name)
-                            .font(.caption)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func optionalHelp(_ text: String?) -> some View {
-        if let text, !text.isEmpty {
-            self.help(text)
-        } else {
-            self
-        }
-    }
-}
-
-private enum SidebarSelection: Hashable {
-    case all
-    case category(DeviceCategory)
-    case runtime(String)
-    case recentlyUsed
-    case withApps
-    case empty
-}
-
-private struct RuntimeEntry: Identifiable {
-    let runtime: String
-    let count: Int
-    let sortKey: RuntimeSection.RuntimeSortKey
-
-    var id: String { runtime }
-}
-
-struct Tag: View {
-    let text: String
-    let style: TagStyle
-
-    init(text: String, style: TagStyle = .primary) {
-        self.text = text
-        self.style = style
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.caption)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(style.background)
-            )
-            .foregroundStyle(style.foreground)
-    }
-}
-
-enum TagStyle {
-    case primary
-
-    var foreground: Color {
-        switch self {
-        case .primary: return .blue
-        }
-    }
-
-    var background: Color {
-        foreground.opacity(0.12)
-    }
-}
-
-private struct PrimaryActionButton: View {
-    let title: String
-    let systemImage: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-    }
-}
-
-private struct SecondaryActionButton: View {
-    let title: String
-    let systemImage: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-    }
-}
-
-private struct DestructiveActionButton: View {
-    let title: String
-    let systemImage: String
-    let isDisabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-        .tint(.red)
-        .controlSize(.large)
-        .disabled(isDisabled)
-    }
-}
-
-struct DeviceIconView: View {
-    let device: SimulatorDevice
-    let size: CGFloat
-    let weight: Font.Weight
-    
-    init(device: SimulatorDevice, size: CGFloat, weight: Font.Weight) {
-        self.device = device
-        self.size = size
-        self.weight = weight
-    }
-
-    var body: some View {
-        let visual = DeviceIcon.for(category: device.category)
-        ZStack {
-//            RoundedRectangle(cornerRadius: 14, style: .continuous)
-//                .fill(visual.background.opacity(0.15))
-            Image(systemName: visual.symbol)
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
-                .foregroundStyle(visual.foreground)
-                .fontWeight(weight)
-        }
-    }
-}
-
-struct DeviceIcon {
-    let symbol: String
-    let foreground: Color
-    let background: Color
-
-    static func `for`(category: DeviceCategory) -> DeviceIcon {
-        switch category {
-        case .iPhone:
-            return .init(symbol: "iphone", foreground: .blue, background: .blue)
-        case .iPad:
-            return .init(symbol: "ipad", foreground: .purple, background: .purple)
-        case .Watch:
-            return .init(symbol: "applewatch", foreground: .green, background: .green)
-        case .TV:
-            return .init(symbol: "appletv", foreground: .indigo, background: .indigo)
-        case .Vision:
-            return .init(symbol: "visionpro", foreground: .orange, background: .orange)
-        case .Other:
-            return .init(symbol: "questionmark.app", foreground: .gray, background: .gray)
-        }
-    }
-}
-
-struct AppIconView: View {
-    let app: SimulatorApp
-
-    var body: some View {
-        let image: NSImage? = {
-            if let iconURL = app.icon, let img = NSImage(contentsOf: iconURL) {
-                return img
-            }
-            return nil
-        }()
-
-        if let image {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .cornerRadius(6)
-        } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.blue)
-                Image(.appGrid)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(4)
-                    .foregroundStyle(.white)
-            }
-        }
-    }
-}
-
-struct RuntimeSection: Identifiable {
-    struct RuntimeSortKey: Comparable {
-        let platform: String
-        let major: Int
-        let minor: Int
-
-        static func < (lhs: RuntimeSortKey, rhs: RuntimeSortKey) -> Bool {
-            if lhs.platform != rhs.platform { return lhs.platform < rhs.platform }
-            if lhs.major != rhs.major { return lhs.major < rhs.major }
-            return lhs.minor < rhs.minor
-        }
-    }
-
-    let id = UUID()
-    let title: String
-    let sortKey: RuntimeSortKey
-
-    static func sortKey(from runtime: String) -> RuntimeSortKey {
-        let comps = runtime.split(separator: " ")
-        let platform = comps.first.map(String.init) ?? "iOS"
-        let version = comps.count > 1 ? comps[1] : ""
-        let parts = version.split(separator: ".")
-        let major = Int(parts.first ?? "0") ?? 0
-        let minor = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
-        return RuntimeSortKey(platform: platform, major: major, minor: minor)
     }
 }

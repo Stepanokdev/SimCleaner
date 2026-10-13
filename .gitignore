@@ -22,3 +22,10 @@ DerivedData/
 # Local working notes and generated reports
 artifacts/
 features-request.md
+
+# Release credentials: the App Store Connect API key and its IDs. Never committed; see docs/RELEASING.md.
+release-keys/
+
+# Agent tooling installed per machine: local settings and skills the skill resolver puts here.
+.claude/settings.local.json
+.claude/skills/

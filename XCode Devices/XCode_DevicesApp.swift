@@ -12,6 +12,8 @@ struct XCode_DevicesApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .frame(minWidth: 1100, minHeight: 640)
         }
+        .defaultSize(width: 1380, height: 860)
     }
 }

@@ -11,6 +11,7 @@ import AppKit
 
 @MainActor
 final class RatingManager: ObservableObject {
+    static let shared = RatingManager()
 
     private enum Keys {
         static let successfulDeletionCount = "successfulDeletionCount"
