@@ -26,6 +26,8 @@ features-request.md
 # Release credentials: the App Store Connect API key and its IDs. Never committed; see docs/RELEASING.md.
 release-keys/
 
-# Agent tooling installed per machine: local settings and skills the skill resolver puts here.
+# Agent tooling installed per machine: local settings and the skills the skill resolver puts here. The
+# project's own skills are committed: list each one as an exception below.
 .claude/settings.local.json
-.claude/skills/
+.claude/skills/*
+!.claude/skills/simcleaner-release/
