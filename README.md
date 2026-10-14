@@ -65,7 +65,7 @@ Every app in the Mac App Store runs in the sandbox. Inside it, macOS keeps the a
 
 If you clean up simulators by hand now and then, the App Store edition is enough, and it updates itself. Pro is for runtimes, for starting simulators without leaving the app, for installing one build on many of them, and for scripts and coding agents.
 
-The App Store edition mentions Pro only next to a feature it can't do, with a link back here. Until the first Pro release is on the Releases page, build it from source with the **SimCleaner Pro** scheme.
+The App Store edition mentions Pro only next to a feature it can't do, with a link back here. **[Download SimCleaner Pro](https://github.com/Stepanokdev/SimCleaner/releases/latest/download/SimCleaner-Pro.dmg)** for macOS 27 and Xcode 27; after that it updates itself. You can also build it from source with the **SimCleaner Pro** scheme.
 
 ## Command line
 
